@@ -1,0 +1,1820 @@
+{
+  "sourceLanguage": "en",
+  "version": "1.0",
+  "strings": {
+    "Breakdown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Breakdown" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "明细" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "明細" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "内訳" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "분석" } }
+      }
+    },
+    "Quota Mode": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Quota Mode" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度模式" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度模式" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータモード" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 모드" } }
+      }
+    },
+    "Automatic": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Automatic" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "自动" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "自動" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "自動" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "자동" } }
+      }
+    },
+    "Custom": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Custom" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "自定义" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "自訂" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "カスタム" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "사용자 지정" } }
+      }
+    },
+    "Quota 1": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Quota 1" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度 1" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度 1" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータ 1" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 1" } }
+      }
+    },
+    "Quota 2": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Quota 2" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度 2" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度 2" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータ 2" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 2" } }
+      }
+    },
+    "Quota Account": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Quota Account" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度账户" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度帳號" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータアカウント" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 계정" } }
+      }
+    },
+    "Usage Summary": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage Summary" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "用量摘要" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "用量摘要" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "使用量サマリー" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "사용량 요약" } }
+      }
+    },
+    "Choose the usage period shown by this widget.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose the usage period shown by this widget." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择此小组件显示的用量周期。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇此小工具顯示的用量週期。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "このウィジェットに表示する使用期間を選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "이 위젯에 표시할 사용량 기간을 선택합니다." } }
+      }
+    },
+    "Usage Breakdown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage Breakdown" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "用量明细" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "用量明細" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "使用量の内訳" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "사용량 분석" } }
+      }
+    },
+    "Choose a tool or model breakdown and its period.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose a tool or model breakdown and its period." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择工具或模型明细及其统计周期。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇工具或模型明細及其統計週期。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ツールまたはモデルの内訳と期間を選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "도구 또는 모델 분석과 기간을 선택합니다." } }
+      }
+    },
+    "Dashboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Dashboard" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "仪表盘" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "儀表板" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダッシュボード" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "대시보드" } }
+      }
+    },
+    "Choose the dashboard period, breakdown, and quota display mode.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose the dashboard period, breakdown, and quota display mode." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择仪表盘的统计周期、明细和额度显示模式。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇儀表板的統計週期、明細和額度顯示模式。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダッシュボードの期間、内訳、クォータ表示モードを選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "대시보드의 기간, 분석 및 할당량 표시 모드를 선택합니다." } }
+      }
+    },
+    "Show quota accounts automatically or choose up to two.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show quota accounts automatically or choose up to two." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "自动显示额度账户，或选择最多两个账户。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "自動顯示額度帳號，或選擇最多兩個帳號。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータアカウントを自動表示するか、最大2つ選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 계정을 자동으로 표시하거나 최대 2개를 선택합니다." } }
+      }
+    },
+    "Token Monitor Dashboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Dashboard" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 仪表盘" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 儀表板" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor ダッシュボード" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 대시보드" } }
+      }
+    },
+    "Usage, quota, breakdown, and activity in one dashboard.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage, quota, breakdown, and activity in one dashboard." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "在一个仪表盘中查看用量、额度、明细和活动。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "在一個儀表板中查看用量、額度、明細和活動。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "使用量、クォータ、内訳、アクティビティを1つのダッシュボードで確認できます。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "사용량, 할당량, 분석 및 활동을 하나의 대시보드에서 확인합니다." } }
+      }
+    },
+    "Token Monitor Summary": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Summary" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 摘要" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 摘要" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor サマリー" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 요약" } }
+      }
+    },
+    "Tokens, cost, and a compact trend.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Tokens, cost, and a compact trend." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "令牌数、费用和简洁趋势。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token 數、費用和簡潔趨勢。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "トークン、コスト、コンパクトな推移。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "토큰, 비용 및 간결한 추세입니다." } }
+      }
+    },
+    "Token Monitor Activity": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Activity" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 活动" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 活動" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor アクティビティ" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 활동" } }
+      }
+    },
+    "Your recent activity heatmap.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Your recent activity heatmap." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "你最近的活动热力图。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "你最近的活動熱力圖。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "最近のアクティビティヒートマップ。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "최근 활동 히트맵입니다." } }
+      }
+    },
+    "Token Monitor Breakdown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Breakdown" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 明细" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 明細" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor 内訳" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 분석" } }
+      }
+    },
+    "Compare tools or models for one period.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Compare tools or models for one period." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "比较一个周期内的工具或模型。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "比較一個期間內的工具或模型。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "1つの期間のツールまたはモデルを比較します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "한 기간의 도구 또는 모델을 비교합니다." } }
+      }
+    },
+    "Token Monitor Quota": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Quota" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 额度" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 額度" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor クォータ" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 할당량" } }
+      }
+    },
+    "Subscription windows and reset times.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Subscription windows and reset times." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "订阅窗口和重置时间。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "訂閱視窗和重設時間。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "サブスクリプション期間とリセット時刻。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "구독 기간과 초기화 시간입니다." } }
+      }
+    },
+    "Current Account": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current Account"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前账号"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前帳號"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在のアカウント"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "현재 계정"
+          }
+        }
+      }
+    },
+    "Overview": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Overview"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "主页"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "主頁"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "概要"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "개요"
+          }
+        }
+      }
+    },
+    "Quota": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额度"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "額度"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "クォータ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "할당량"
+          }
+        }
+      }
+    },
+    "Tools": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tools"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ツール"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "도구"
+          }
+        }
+      }
+    },
+    "Models": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Models"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模型"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模型"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "モデル"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "모델"
+          }
+        }
+      }
+    },
+    "Activity": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活动"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活動"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクティビティ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "활동"
+          }
+        }
+      }
+    },
+    "Not configured": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not configured"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未配置"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未設定"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未設定"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "구성되지 않음"
+          }
+        }
+      }
+    },
+    "Sign in again": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in again"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要重新登录"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要重新登入"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再ログインが必要です"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "다시 로그인 필요"
+          }
+        }
+      }
+    },
+    "Unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不可用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法使用"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "利用できません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사용할 수 없음"
+          }
+        }
+      }
+    },
+    "Temporarily unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Temporarily unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂时不可用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暫時無法使用"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一時的に利用できません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "일시적으로 사용할 수 없음"
+          }
+        }
+      }
+    },
+    "Available": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可用"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "利用可能"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사용 가능"
+          }
+        }
+      }
+    },
+    "Unlimited": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlimited"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlimited"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlimited"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlimited"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlimited"
+          }
+        }
+      }
+    },
+    "Disabled": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disabled"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已停用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已停用"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無効"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "비활성화됨"
+          }
+        }
+      }
+    },
+    "Rate limited": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rate limited"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请求受限"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請求受限"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "レート制限中"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "요청 제한됨"
+          }
+        }
+      }
+    },
+    "Data may be stale": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Data may be stale"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "数据可能已过期"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "資料可能已過期"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "データが古い可能性があります"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "데이터가 오래되었을 수 있음"
+          }
+        }
+      }
+    },
+    "Waiting for data": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for data"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待数据"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待資料"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "データを待機中"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "데이터 대기 중"
+          }
+        }
+      }
+    },
+    "Open Token Monitor once": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Token Monitor once"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先打开一次 Token Monitor"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請先開啟一次 Token Monitor"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token Monitor を一度開いてください"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Token Monitor를 한 번 열어 주세요"
+          }
+        }
+      }
+    },
+    "No data": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No data"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无数据"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暫無資料"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "データがありません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "데이터 없음"
+          }
+        }
+      }
+    },
+    "%lld active days": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld active days"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活跃 %lld 天"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活躍 %lld 天"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクティブ %lld 日"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "활동 %lld일"
+          }
+        }
+      }
+    },
+    "%@, %lld tokens": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, %lld tokens"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@，%lld tokens"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@，%lld tokens"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@、%lld トークン"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, %lld 토큰"
+          }
+        }
+      }
+    },
+    "Deselect": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deselect"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消选择"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消選取"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択を解除"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "선택 해제"
+          }
+        }
+      }
+    },
+    "Show usage for this day": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show usage for this day"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示当日消耗"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示當日消耗"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この日の使用量を表示"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 날짜 사용량 표시"
+          }
+        }
+      }
+    },
+    "Activity heatmap": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activity heatmap"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活动热力图"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活動熱力圖"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクティビティヒートマップ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "활동 히트맵"
+          }
+        }
+      }
+    },
+    "Updated %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updated %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新于 %@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新於 %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ に更新"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 업데이트"
+          }
+        }
+      }
+    },
+    "Period": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Period"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "统计周期"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "統計週期"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "期間"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "기간"
+          }
+        }
+      }
+    },
+    "DAY": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DAY"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DAY"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DAY"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DAY"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DAY"
+          }
+        }
+      }
+    },
+    "MONTH": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MONTH"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MONTH"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MONTH"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MONTH"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MONTH"
+          }
+        }
+      }
+    },
+    "TOTAL": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TOTAL"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TOTAL"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TOTAL"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TOTAL"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TOTAL"
+          }
+        }
+      }
+    },
+    "Today usage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today usage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当日统计"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "當日統計"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日の使用量"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오늘 사용량"
+          }
+        }
+      }
+    },
+    "This month usage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This month usage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本月统计"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本月統計"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今月の使用量"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이번 달 사용량"
+          }
+        }
+      }
+    },
+    "All-time usage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All-time usage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "累计统计"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "累計統計"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "累計使用量"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "누적 사용량"
+          }
+        }
+      }
+    },
+    "Widget Size": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Widget Size"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "小组件尺寸"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "小工具尺寸"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ウィジェットサイズ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "위젯 크기"
+          }
+        }
+      }
+    },
+    "Small": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Small"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "小号"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "小型"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "小"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "소형"
+          }
+        }
+      }
+    },
+    "Medium": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medium"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中号"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中型"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "중형"
+          }
+        }
+      }
+    },
+    "Large": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Large"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大号"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大型"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "대형"
+          }
+        }
+      }
+    },
+    "Select Activity Date": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select Activity Date"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择活动日期"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇活動日期"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクティビティ日を選択"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "활동 날짜 선택"
+          }
+        }
+      }
+    },
+    "Date": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Date"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日期"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日期"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日付"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "날짜"
+          }
+        }
+      }
+    },
+    "%@ · %@ tokens": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ tokens"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ tokens"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ tokens"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@トークン"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ 토큰"
+          }
+        }
+      }
+    },
+    "%@ · %@ tokens · %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ tokens · %3$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ tokens · %3$@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ tokens · %3$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@トークン · %3$@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ 토큰 · %3$@"
+          }
+        }
+      }
+    },
+    "%@ tokens · %lld active days": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ tokens · %lld active days"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ tokens · 活跃 %lld 天"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ tokens · 活躍 %lld 天"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@トークン · アクティブ %lld 日"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 토큰 · 활동 %lld일"
+          }
+        }
+      }
+    },
+    "%@ left": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ left"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剩余 %@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剩餘 %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "残り %@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 남음"
+          }
+        }
+      }
+    },
+    "%lld%% left": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld%% left"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剩余 %lld%%"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剩餘 %lld%%"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "残り %lld%%"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld%% 남음"
+          }
+        }
+      }
+    },
+    "Expires in %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expires in %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 后到期"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 後到期"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@後に期限切れ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 후 만료"
+          }
+        }
+      }
+    },
+    "Changes in %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes in %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 后变更"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 後變更"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@後に変更"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 후 변경"
+          }
+        }
+      }
+    },
+    "Changes now": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes now"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在变更"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在變更"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "変更中"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "변경 중"
+          }
+        }
+      }
+    },
+    "Refresh Widget": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh Widget"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新小组件"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新整理小工具"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ウィジェットを更新"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "위젯 새로고침"
+          }
+        }
+      }
+    },
+    "Reset in %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset in %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 后重置"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 後重設"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@後にリセット"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 후 초기화"
+          }
+        }
+      }
+    }
+  }
+}
