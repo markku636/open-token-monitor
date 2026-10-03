@@ -1,0 +1,5 @@
+# LF on every platform, as upstream does: tests match source text with \n, and
+# the hub image and installers are built from these files as committed.
+* text=auto eol=lf
+# cmd.exe misreads batch files with bare LF line endings.
+*.cmd text eol=crlf
