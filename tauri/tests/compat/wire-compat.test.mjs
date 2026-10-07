@@ -473,6 +473,124 @@ test("limits: Claude and Codex usage map exactly like upstream", { skip }, () =>
   assert.ok(!byId.claude.windows.some((w) => w.label === "Opus"), "other scoped weeklies are dropped");
 });
 
+// 自適應額度排程的消耗速度估計：同一串觀測（上游正規化後的額度摘要、哪些 provider 是這次探測成功的、
+// 提早探測的嘗試）依序交給上游 burnRate.js 與 tm-agent，每一步的「下一次提早探測」與各窗口的樣本
+// （速度、基準時間）逐欄相同。涵蓋：未探測的列不當基準、暫時性失敗不取樣、速度變慢只衰減、跨過重置
+// 重新取基準、金額與沒有百分比的窗口不量、最快每分鐘、嘗試的下限、同時到期、用完的窗口與修剪。
+test("limits: the adaptive burn-rate schedule matches upstream step by step", { skip }, () => {
+  const bin = agentBin();
+  const core = up("limits/core.js");
+  const burn = up("limits/burnRate.js");
+  const T0 = Date.parse("2026-09-24T08:00:00.000Z");
+  const MIN = 60_000;
+  const iso = (ms) => new Date(ms).toISOString();
+  const RESET_A = "2026-09-24T10:00:00.000Z";
+  const RESET_B = "2026-09-24T15:00:00.000Z";
+  const WEEK = "2026-09-30T00:00:00.000Z";
+  const CLAUDE_ID = "claude:sha256:claude:dev@example.com:Max 5x";
+  const claude = (at, session, { status = "ok", reset = RESET_A, weekly = 20, fable = null } = {}) => ({
+    provider: "claude",
+    accountKey: "sha256:claude",
+    accountEmail: "dev@example.com",
+    accountLabel: "Max 5x",
+    status,
+    updatedAt: iso(at),
+    windows: [
+      { kind: "session", label: "", usedPercent: session, resetsAt: reset, windowMinutes: 300 },
+      { kind: "weekly", label: "", usedPercent: weekly, resetsAt: WEEK },
+      { kind: "weekly", label: "Fable", additional: true, used: fable, limit: fable === null ? null : 100, resetsAt: WEEK },
+    ],
+  });
+  const codex = (at, session) => ({
+    provider: "codex",
+    accountKey: "codex-key",
+    accountLabel: "Pro",
+    status: "ok",
+    updatedAt: iso(at),
+    windows: [{ kind: "session", label: "", usedPercent: session, resetsAt: RESET_A }],
+  });
+  const cursor = (at, used) => ({
+    provider: "cursor",
+    accountKey: "cursor-key",
+    status: "ok",
+    updatedAt: iso(at),
+    windows: [
+      { kind: "billing", label: "Auto", usedPercent: used, resetsAt: WEEK },
+      { kind: "billing", metric: "credits", label: "On-demand", used: 12, limit: 20, resetsAt: WEEK },
+    ],
+  });
+  const copilot = (at, used) => ({
+    provider: "copilot",
+    accountKey: "copilot-key",
+    status: "ok",
+    updatedAt: iso(at),
+    windows: [{ kind: "billing", label: "Premium", usedPercent: used, resetsAt: WEEK }],
+  });
+  const all = ["claude", "codex", "cursor", "copilot"];
+  const t = (m) => T0 + m;
+  const raw = [
+    // 1. 基準；Copilot 是上次留下的列（還沒探測過），不能當基準。
+    { nowMs: t(0), probed: ["claude", "codex", "cursor"], providers: [claude(t(0), 40), codex(t(0), 10), cursor(t(0), 50), copilot(t(0), 30)] },
+    // 2. Claude 5 分鐘用了 15%；Copilot 這次才第一次探測。
+    { nowMs: t(5 * MIN), probed: all, providers: [claude(t(5 * MIN), 55, { weekly: 21, fable: 5 }), codex(t(5 * MIN), 10), cursor(t(5 * MIN), 52), copilot(t(5 * MIN), 31)] },
+    // 3. 提早探測 Claude：更快了（立刻採用）；其他列沒重新探測（updatedAt 相同，不重複取樣）。
+    { nowMs: t(8 * MIN + 45_000), attempt: { atMs: t(8 * MIN + 45_000), keys: [CLAUDE_ID] }, probed: ["claude"], providers: [claude(t(8 * MIN + 45_000), 70, { weekly: 22, fable: 6 }), codex(t(5 * MIN), 10), cursor(t(5 * MIN), 52), copilot(t(5 * MIN), 31)] },
+    // 4. 暫時性失敗：重發 last-good，不取樣；嘗試照記。
+    { nowMs: t(10 * MIN), attempt: { atMs: t(10 * MIN), keys: [CLAUDE_ID] }, probed: [], providers: [claude(t(8 * MIN + 45_000), 70, { status: "rateLimited", weekly: 22, fable: 6 }), codex(t(5 * MIN), 10), cursor(t(5 * MIN), 52), copilot(t(5 * MIN), 31)] },
+    // 5. 變慢：只衰減。
+    { nowMs: t(12 * MIN), probed: ["claude"], providers: [claude(t(12 * MIN), 71, { weekly: 22, fable: 6 }), codex(t(5 * MIN), 10), cursor(t(5 * MIN), 52), copilot(t(5 * MIN), 31)] },
+    // 6. Claude 的 5 小時窗口重置：重新取基準、沿用速度；Cursor 不見了（修剪）。
+    { nowMs: t(15 * MIN), probed: all, providers: [claude(t(15 * MIN), 3, { reset: RESET_B, weekly: 23, fable: 7 }), codex(t(15 * MIN), 60), copilot(t(15 * MIN), 31)] },
+    // 7. Codex 與 Claude 同時快用完：兩個都被下限擋在同一時間。
+    { nowMs: t(20 * MIN), probed: all, providers: [claude(t(20 * MIN), 90, { reset: RESET_B, weekly: 30, fable: 8 }), codex(t(20 * MIN), 99), copilot(t(20 * MIN), 31)] },
+    // 8. 同時到期的提早探測：Codex 已經用完（不再提早），Claude 還在燒。
+    { nowMs: t(21 * MIN), attempt: { atMs: t(21 * MIN), keys: [CLAUDE_ID, "codex:codex-key::Pro"] }, probed: ["claude", "codex"], providers: [claude(t(21 * MIN), 95, { reset: RESET_B, weekly: 31, fable: 9 }), codex(t(21 * MIN), 100), copilot(t(20 * MIN), 31)] },
+  ];
+  const steps = raw.map(({ providers, ...step }) => ({
+    ...step,
+    limits: plain(core.normalizeLimitsSummary({ updatedAt: iso(step.nowMs), refreshMs: 300_000, providers })),
+  }));
+
+  // 上游：與 limits/runtime.js 相同的呼叫順序。
+  const state = burn.createLimitsBurnState();
+  const theirs = steps.map((step) => {
+    if (step.attempt) burn.recordLimitsUrgencyAttempt(state, step.attempt.keys, step.attempt.atMs);
+    for (const row of step.limits.providers) {
+      if (row.status === "ok" && step.probed.includes(row.provider)) burn.markLimitsProbeSuccess(state, row);
+    }
+    burn.recordLimitsSample(state, step.limits, step.nowMs);
+    burn.pruneLimitsBurnState(state, step.limits);
+    const due = burn.nextLimitsUrgencyRefresh(step.limits, state, step.nowMs, { baseRefreshMs: burn.LIMITS_ADAPTIVE_BASE_MS });
+    return plain({
+      due: due && { refreshAt: due.refreshAt, delayMs: due.delayMs, keys: due.keys, providers: due.scopes.map((s) => s.provider) },
+      windows: Object.fromEntries(state.windows),
+    });
+  });
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tm-burn-"));
+  try {
+    const file = path.join(dir, "steps.json");
+    fs.writeFileSync(file, JSON.stringify({ steps }));
+    const res = spawnSync(bin, ["limits", "--burn-replay", file], {
+      encoding: "utf8",
+      env: { ...process.env, TOKEN_MONITOR_CONFIG_DIR: path.join(dir, "config"), TOKEN_MONITOR_DISABLE_KEYRING: "1" },
+    });
+    assert.equal(res.status, 0, res.stderr);
+    const ours = JSON.parse(res.stdout);
+    assert.equal(ours.length, steps.length);
+    ours.forEach((step, i) => assertSame(step, theirs[i], `step ${i + 1}`));
+    // 這串觀測真的走到了各種情況（避免 fixture 退化成一路 null 也「相同」）。
+    assert.equal(theirs[0].due, null, "a lone baseline has no rate");
+    assert.ok(!Object.keys(theirs[0].windows).some((k) => k.startsWith("copilot:")), "an unprobed row is not a baseline");
+    assert.ok(theirs.filter((s) => s.due).length >= 4, "several steps schedule an early probe");
+    assert.ok(theirs.some((s) => s.due && s.due.keys.length === 2), "a tie keeps both providers");
+    assert.ok(theirs.some((s) => s.due && s.due.delayMs > MIN), "a burn slower than the floor");
+    assert.ok(!Object.keys(theirs[5].windows).some((k) => k.startsWith("cursor:")), "a provider that left is pruned");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // 同一個設定目錄連跑兩次：第二次 client 已經刪掉 c-2 的紀錄。我們補回來的結果要與上游
 // updateSessionUsageArchive + applySessionUsageArchive（+ applyProjectRollups）完全相同。
 test("session usage archive: deleted sessions come back exactly like upstream", { skip }, () => {

@@ -91,6 +91,9 @@ pub struct Cli {
     /// 額度探測間隔（毫秒；60000 / 120000 / 300000 / 900000 / 1800000）
     #[arg(long, global = true, env = "TOKEN_MONITOR_LIMITS_REFRESH_MS")]
     limits_refresh_ms: Option<u64>,
+    /// 額度探測排程：`fixed`（依 --limits-refresh-ms）或 `adaptive`（每 5 分鐘，快用完的額度提早、最快每分鐘）
+    #[arg(long, global = true, env = "TOKEN_MONITOR_LIMITS_REFRESH_MODE")]
+    limits_refresh_mode: Option<String>,
     /// 專案（資料夾）統計；`0` / `false` / `no` / `off` 關閉（與上游 agent 相同）
     #[arg(long, global = true, env = "TOKEN_MONITOR_PROJECTS_ENABLED")]
     projects: Option<String>,
@@ -164,6 +167,10 @@ enum Command {
         /// 相容測試用：不連網，以目錄裡的 claude-usage.json / codex-usage.json 跑對應，印 JSON
         #[arg(long, hide = true)]
         replay: Option<PathBuf>,
+        /// 相容測試用：不連網，把 JSON 檔裡的每一步（額度摘要、探測了哪些 provider、提早探測的嘗試）
+        /// 依序餵給自適應排程的消耗速度估計，每一步印出下一次提早探測與各窗口的樣本（JSON）
+        #[arg(long, hide = true)]
+        burn_replay: Option<PathBuf>,
     },
     /// 連上 hub 的即時串流，印出全公司的用量摘要（widget「全公司」分頁的同一份資料）
     Company {
@@ -248,6 +255,7 @@ const LEGACY_FLAGS: &[(&str, &str)] = &[
     ("--limitProviders", "--limit-providers"),
     ("--limitsEnabled", "--limits"),
     ("--limitsRefreshMs", "--limits-refresh-ms"),
+    ("--limitsRefreshMode", "--limits-refresh-mode"),
     ("--historyEnabled", "--history"),
     ("--historyIntervalMs", "--history-interval-ms"),
     ("--projectsEnabled", "--projects"),
@@ -385,6 +393,23 @@ fn load_context(cli: &Cli) -> AppResult<Context> {
         std::env::set_var(crate::store::CONFIG_DIR_ENV, dir);
     }
     let mut settings = Settings::load_or_init(&crate::store::config_dir())?;
+    apply_overrides(cli, &mut settings);
+    let device_id = cli
+        .device
+        .clone()
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| settings.device_id.clone());
+    let hub = resolve_hub(&settings, cli.hub.as_deref(), cli.secret.as_deref());
+    Ok(Context {
+        settings,
+        device_id,
+        hub,
+    })
+}
+
+/// 命令列旗標與環境變數（clap 已合併）蓋過設定檔，再收斂成合法值。
+fn apply_overrides(cli: &Cli, settings: &mut Settings) {
     if let Some(clients) = &cli.clients {
         settings.tracked_clients = clients.clone();
     }
@@ -418,22 +443,13 @@ fn load_context(cli: &Cli) -> AppResult<Context> {
     if let Some(ms) = cli.limits_refresh_ms {
         settings.limits_refresh_ms = ms;
     }
+    if let Some(mode) = &cli.limits_refresh_mode {
+        settings.limits_refresh_mode = mode.clone();
+    }
     if let Some(email) = &cli.owner_email {
         settings.owner_email = email.clone();
     }
     settings.validate();
-    let device_id = cli
-        .device
-        .clone()
-        .map(|d| d.trim().to_string())
-        .filter(|d| !d.is_empty())
-        .unwrap_or_else(|| settings.device_id.clone());
-    let hub = resolve_hub(&settings, cli.hub.as_deref(), cli.secret.as_deref());
-    Ok(Context {
-        settings,
-        device_id,
-        hub,
-    })
 }
 
 fn scan_source(cli: &Cli, settings: &Settings) -> AppResult<ScanSource> {
@@ -636,6 +652,12 @@ async fn cmd_run(
         upload_interval_ms = ctx.settings.sync_upload_interval_ms, source = %source.describe(),
         watch = watch.is_some(),
         limits = ?limits.as_ref().map(|l| l.providers.join(",")),
+        // 上游 agent 的啟動訊息：`<providers>:adaptive` 或 `<providers>:<ms>ms`。
+        limits_refresh = %limits.as_ref().map_or_else(String::new, |l| if l.adaptive {
+            "adaptive".to_string()
+        } else {
+            format!("{}ms", l.refresh_ms)
+        }),
         "tm-agent started"
     );
     let sink = if events {
@@ -810,15 +832,66 @@ fn cmd_limits_replay(dir: &std::path::Path) -> AppResult<()> {
     Ok(())
 }
 
+/// 相容測試：與上游 burnRate.js 逐步比對。每一步依 runtime 的順序：先記下提早探測的嘗試，
+/// 再把 `probed` 裡的 provider 探測成功的列標成量測、取樣、修剪，最後算下一次提早探測。
+fn cmd_limits_burn_replay(path: &std::path::Path) -> AppResult<()> {
+    use crate::limits::burn_rate::{BurnState, LIMITS_ADAPTIVE_BASE_MS};
+    use crate::wire::{LimitsSummary, ProviderStatus};
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Attempt {
+        at_ms: i64,
+        keys: Vec<String>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Step {
+        now_ms: i64,
+        limits: LimitsSummary,
+        #[serde(default)]
+        probed: Vec<String>,
+        #[serde(default)]
+        attempt: Option<Attempt>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Replay {
+        steps: Vec<Step>,
+    }
+
+    let text = std::fs::read_to_string(path).map_err(|e| AppError::Storage(e.to_string()))?;
+    let replay: Replay = serde_json::from_str(&text)
+        .map_err(|e| AppError::InvalidArgument(format!("{}: {e}", path.display())))?;
+    let mut state = BurnState::default();
+    let mut out = Vec::new();
+    for step in replay.steps {
+        if let Some(a) = &step.attempt {
+            state.record_attempt(&a.keys, a.at_ms);
+        }
+        for row in &step.limits.providers {
+            if row.status == ProviderStatus::Ok && step.probed.contains(&row.provider) {
+                state.mark_probe_success(row);
+            }
+        }
+        state.record_sample(&step.limits, step.now_ms);
+        state.prune(&step.limits);
+        let due = state.next_urgency(&step.limits, step.now_ms, LIMITS_ADAPTIVE_BASE_MS);
+        out.push(serde_json::json!({ "due": due, "windows": state.samples() }));
+    }
+    print_json(&out, false);
+    Ok(())
+}
+
 async fn cmd_limits(ctx: Context, json: bool) -> AppResult<()> {
     let config = LimitsConfig::from_settings(&ctx.settings).unwrap_or(LimitsConfig {
         providers: crate::settings::SUPPORTED_LIMIT_PROVIDERS
             .iter()
             .map(|s| s.to_string())
             .collect(),
-        refresh_ms: ctx.settings.limits_refresh_ms,
+        refresh_ms: ctx.settings.effective_limits_refresh_ms(),
+        adaptive: ctx.settings.limits_adaptive(),
     });
-    let (summary, _) = LimitsRuntime::new(config).probe_all().await;
+    let summary = LimitsRuntime::new(config).probe_all().await;
     if json {
         print_json(&summary, false);
         return Ok(());
@@ -1167,9 +1240,14 @@ pub async fn run(cli: Cli) -> ExitCode {
             }
             Command::Scan { ref period, raw } => cmd_scan(&cli, ctx, period.clone(), raw).await,
             Command::Health => cmd_health(ctx).await,
-            Command::Limits { json, ref replay } => match replay {
-                Some(dir) => cmd_limits_replay(dir),
-                None => cmd_limits(ctx, json).await,
+            Command::Limits {
+                json,
+                ref replay,
+                ref burn_replay,
+            } => match (replay, burn_replay) {
+                (Some(dir), _) => cmd_limits_replay(dir),
+                (None, Some(file)) => cmd_limits_burn_replay(file),
+                (None, None) => cmd_limits(ctx, json).await,
             },
             Command::Company {
                 json,
@@ -1249,5 +1327,26 @@ mod tests {
         assert_eq!(args(&["tm-agent"]), ["tm-agent", "run"]);
         assert_eq!(args(&["tm-agent", "doctor"]), ["tm-agent", "doctor"]);
         assert_eq!(args(&["tm-agent", "--help"]), ["tm-agent", "--help"]);
+    }
+
+    #[test]
+    fn the_limits_refresh_mode_flag_reaches_the_limits_config() {
+        // 上游 agent 的拼法是 `--limitsRefreshMode`（config.js parseArgs 不轉換大小寫）。
+        let argv = args(&["tm-agent", "--once", "--limitsRefreshMode=Adaptive"]);
+        assert_eq!(argv, ["tm-agent", "once", "--limits-refresh-mode=Adaptive"]);
+        let cli = Cli::try_parse_from(&argv).unwrap();
+        assert_eq!(cli.limits_refresh_mode.as_deref(), Some("Adaptive"));
+        let mut settings = Settings {
+            limits_refresh_ms: 900_000,
+            ..Settings::default()
+        };
+        apply_overrides(&cli, &mut settings);
+        assert_eq!(settings.limits_refresh_mode, "adaptive");
+        let config = LimitsConfig::from_settings(&settings).unwrap();
+        assert!(config.adaptive);
+        assert_eq!(
+            config.refresh_ms, 300_000,
+            "adaptive replaces the fixed interval"
+        );
     }
 }

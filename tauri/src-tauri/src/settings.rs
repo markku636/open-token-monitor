@@ -42,6 +42,9 @@ pub const SYNC_UPLOAD_INTERVAL_OPTIONS: &[u64] = &[0, 600_000, 1_200_000, 1_800_
 /// 大量裝置同時上線時 hub 負載較重，預設 10 分鐘上傳一次。
 pub const DEFAULT_SYNC_UPLOAD_INTERVAL_MS: u64 = 600_000;
 pub const LIMITS_REFRESH_OPTIONS: &[u64] = &[60_000, 120_000, 300_000, 900_000, 1_800_000];
+/// `limitsRefreshMode` 的值（上游 collector.js `normalizeLimitsRefreshMode`）。
+pub const LIMITS_REFRESH_MODE_FIXED: &str = "fixed";
+pub const LIMITS_REFRESH_MODE_ADAPTIVE: &str = "adaptive";
 /// 上游 collector.js `HISTORY_INTERVAL_VALUES` / `DEFAULT_HISTORY_INTERVAL_MS`。
 pub const HISTORY_INTERVAL_OPTIONS: &[u64] = &[300_000, 600_000, 900_000, 1_800_000, 3_600_000];
 pub const DEFAULT_HISTORY_INTERVAL_MS: u64 = 900_000;
@@ -104,6 +107,9 @@ pub struct Settings {
     pub limits_enabled: bool,
     pub limit_providers: Vec<String>,
     pub limits_refresh_ms: u64,
+    /// `fixed`（每 `limitsRefreshMs`）| `adaptive`（每 5 分鐘，快用完的額度提早、最快每分鐘；
+    /// limits/burn_rate.rs）。與 `limitsRefreshMs` 分開存：切到自適應再切回來，原本選的間隔還在（上游同名設定）。
+    pub limits_refresh_mode: String,
     /// `auto` | `zh-TW` | `en`
     pub language: String,
     /// `system` | `dark` | `light`（前端套色票；system 跟著 Windows 的應用程式模式）
@@ -182,6 +188,7 @@ impl Default for Settings {
                 .map(|s| s.to_string())
                 .collect(),
             limits_refresh_ms: 300_000,
+            limits_refresh_mode: LIMITS_REFRESH_MODE_FIXED.into(),
             language: "auto".into(),
             theme: "system".into(),
             automatic_app_updates: true,
@@ -277,6 +284,11 @@ impl Settings {
         if !LIMITS_REFRESH_OPTIONS.contains(&self.limits_refresh_ms) {
             self.limits_refresh_ms = 300_000;
             changed.push("limitsRefreshMs");
+        }
+        let mode = normalize_limits_refresh_mode(&self.limits_refresh_mode);
+        if mode != self.limits_refresh_mode {
+            self.limits_refresh_mode = mode.to_string();
+            changed.push("limitsRefreshMode");
         }
         let interval = self.collection_interval_ms.clamp(60_000, 3_600_000);
         if interval != self.collection_interval_ms {
@@ -422,6 +434,21 @@ impl Settings {
         store::write_json_in(dir, SETTINGS_FILE, self)
     }
 
+    /// `limitsRefreshMode = adaptive`。
+    pub fn limits_adaptive(&self) -> bool {
+        normalize_limits_refresh_mode(&self.limits_refresh_mode) == LIMITS_REFRESH_MODE_ADAPTIVE
+    }
+
+    /// 額度實際的基本間隔：自適應固定 5 分鐘（取代而不是修改 `limitsRefreshMs`，上游 limits/runtime.js），
+    /// wire 的 `refreshMs` 描述的也是這個。
+    pub fn effective_limits_refresh_ms(&self) -> u64 {
+        if self.limits_adaptive() {
+            crate::limits::burn_rate::LIMITS_ADAPTIVE_BASE_MS
+        } else {
+            self.limits_refresh_ms
+        }
+    }
+
     /// GUI 與 tm-agent 共用的啟動流程：讀設定、第一次啟動時依 D9 規則指派 deviceId 並寫回。
     pub fn load_or_init(dir: &std::path::Path) -> AppResult<Settings> {
         let (mut settings, created) = Settings::load_in(dir)?;
@@ -454,6 +481,15 @@ impl Settings {
             serde_json::from_value(merged).map_err(|e| AppError::Settings(e.to_string()))?;
         next.validate();
         Ok(next)
+    }
+}
+
+/// 上游 `normalizeLimitsRefreshMode`：只有 `adaptive`（去空白、不分大小寫）是自適應，其他都是 `fixed`。
+pub fn normalize_limits_refresh_mode(value: &str) -> &'static str {
+    if value.trim().to_lowercase() == LIMITS_REFRESH_MODE_ADAPTIVE {
+        LIMITS_REFRESH_MODE_ADAPTIVE
+    } else {
+        LIMITS_REFRESH_MODE_FIXED
     }
 }
 
@@ -831,6 +867,41 @@ mod tests {
         assert_eq!(s.limit_providers, vec!["claude"]);
         assert_eq!(s.hub_url, "https://hub.example");
         assert_eq!(s.opacity, 40);
+    }
+
+    #[test]
+    fn adaptive_limits_refresh_replaces_the_interval_without_losing_it() {
+        for (raw, mode) in [
+            (" Adaptive ", "adaptive"),
+            ("adaptive", "adaptive"),
+            ("", "fixed"),
+            ("burn-rate", "fixed"),
+        ] {
+            assert_eq!(normalize_limits_refresh_mode(raw), mode, "{raw:?}");
+        }
+        let mut s = Settings {
+            limits_refresh_ms: 900_000,
+            limits_refresh_mode: "ADAPTIVE".into(),
+            ..Settings::default()
+        };
+        assert_eq!(s.validate(), vec!["limitsRefreshMode"]);
+        assert_eq!(s.limits_refresh_mode, "adaptive");
+        assert_eq!(s.effective_limits_refresh_ms(), 300_000);
+        let config = crate::limits::runtime::LimitsConfig::from_settings(&s).unwrap();
+        assert!(config.adaptive);
+        assert_eq!(config.refresh_ms, 300_000);
+        // 切回固定：原本選的 15 分鐘還在。
+        let s = s
+            .patched(&serde_json::from_str(r#"{"limitsRefreshMode":"fixed"}"#).unwrap())
+            .unwrap();
+        assert_eq!(s.effective_limits_refresh_ms(), 900_000);
+        assert!(
+            !crate::limits::runtime::LimitsConfig::from_settings(&s)
+                .unwrap()
+                .adaptive
+        );
+        let raw = serde_json::to_value(&s).unwrap();
+        assert_eq!(raw["limitsRefreshMode"], "fixed");
     }
 
     #[test]

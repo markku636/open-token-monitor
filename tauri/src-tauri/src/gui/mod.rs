@@ -49,8 +49,13 @@ pub(crate) fn quit(app: &AppHandle) {
 pub fn run() {
     let config_dir = crate::store::config_dir();
     let log_guard = crate::logging::init_file(&crate::store::log_dir());
+    // 全新安裝（讀設定之前還沒有檔案）才依偵測到的工具決定要查哪些額度（limits/seed.rs）。
+    let settings_file_existed = config_dir.join(crate::settings::SETTINGS_FILE).exists();
     let settings = match Settings::load_or_init(&config_dir) {
-        Ok(s) => s,
+        Ok(mut s) => {
+            crate::limits::seed::seed_on_first_run(&mut s, &config_dir, settings_file_existed);
+            s
+        }
         Err(e) => {
             tracing::error!(error = %e, "failed to load settings; using defaults");
             Settings::default()

@@ -151,6 +151,9 @@ export const EN: Record<string, string> = {
   "顯示並上傳額度": "Show and upload limits",
   "讀取這台電腦上 Claude Code 與 Codex 的登入，查詢用量上限；不會上傳任何 token": "Uses this PC's Claude Code and Codex sign-ins to look up usage limits; no tokens are uploaded",
   "查詢間隔": "Refresh interval",
+  "自適應": "Adaptive",
+  "根據額度消耗速度自動調整更新頻率：通常每 5 分鐘，必要時最快每分鐘一次。":
+    "Adjusts the refresh rate to how fast a quota is being consumed: every 5 minutes normally, as often as every minute when needed.",
   "公司 hub": "Company hub",
   "位置": "Address",
   "連線金鑰": "Connection key",

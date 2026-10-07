@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LimitProvider, LimitWindow } from "./api";
-import { meterTone, moneyText, statusNote, windowTitle } from "./limits";
+import { limitsRefreshPatch, limitsRefreshSelectValue, meterTone, moneyText, statusNote, windowTitle } from "./limits";
 
 const w = (over: Partial<LimitWindow>): LimitWindow => ({
   kind: "session",
@@ -56,5 +56,14 @@ describe("limits", () => {
   it("formats money windows", () => {
     expect(moneyText(w({ metric: "spend", used: 2.35, limit: 20, currency: "USD" }))).toBe("$2.35 / $20.00");
     expect(moneyText(w({ metric: "spend", used: 235, limit: null, currency: "JPY" }))).toBe("JPY 235.00");
+  });
+
+  it("maps the refresh setting to one selector like upstream", () => {
+    expect(limitsRefreshSelectValue({ limitsRefreshMode: "adaptive", limitsRefreshMs: 900_000 })).toBe("adaptive");
+    expect(limitsRefreshSelectValue({ limitsRefreshMode: "fixed", limitsRefreshMs: 900_000 })).toBe("900000");
+    expect(limitsRefreshSelectValue({ limitsRefreshMode: "fixed", limitsRefreshMs: 42 })).toBe("300000");
+    // 自適應只換模式：存著的間隔留著，切回固定時再用。
+    expect(limitsRefreshPatch("adaptive")).toEqual({ limitsRefreshMode: "adaptive" });
+    expect(limitsRefreshPatch("120000")).toEqual({ limitsRefreshMode: "fixed", limitsRefreshMs: 120_000 });
   });
 });

@@ -46,7 +46,7 @@ use crate::collector::{
 };
 use crate::error::{AppError, AppResult};
 use crate::hub::IngestOutcome;
-use crate::limits::runtime::{LimitsConfig, LimitsRuntime};
+use crate::limits::runtime::{LimitsConfig, LimitsRuntime, LimitsWake};
 use crate::usage::archive::CaptureAt;
 use crate::usage::archive_store::ArchiveStore;
 use crate::wire::time::iso_millis;
@@ -307,20 +307,29 @@ impl DeviceRuntime {
         rt
     }
 
-    /// 探測一輪額度並交給裝置狀態（第一筆用量出現前會先緩衝，見 device/state.rs）。
-    async fn run_limits_round(&self, lr: &mut LimitsRuntime) -> Duration {
-        let (summary, wait) = lr.probe_all().await;
-        let next_at = chrono::Utc::now()
-            + chrono::Duration::from_std(wait).unwrap_or_else(|_| chrono::Duration::zero());
+    /// 執行一次額度的醒來（完整、重置點、提早或重試），把結果交給裝置狀態（第一筆用量出現前會先緩衝，
+    /// 見 device/state.rs），回傳下一次醒來前要等多久、要做什麼。全部延後（退避中）時摘要不變、不發佈。
+    async fn run_limits_round(
+        &self,
+        lr: &mut LimitsRuntime,
+        wake: LimitsWake,
+    ) -> (Duration, LimitsWake) {
+        let probed = lr.run(wake).await;
+        let now = chrono::Utc::now();
+        let now_ms = now.timestamp_millis();
+        let (at_ms, next) = lr.next_wake(now_ms);
+        let next_at = chrono::DateTime::from_timestamp_millis(at_ms).unwrap_or(now);
         (self.events)(CoreEvent::LimitsUpdated {
-            summary: summary.clone(),
+            summary: lr.summary().clone(),
             next_at: iso_millis(next_at),
         });
-        let published = self.state.lock().unwrap().update_limits(summary);
-        if let Some(p) = published {
-            self.after_publish(&p);
+        if let Some(summary) = probed {
+            let published = self.state.lock().unwrap().update_limits(summary);
+            if let Some(p) = published {
+                self.after_publish(&p);
+            }
         }
-        wait
+        (Duration::from_millis((at_ms - now_ms).max(0) as u64), next)
     }
 
     /// 要求立刻重新探測額度（設定頁、tray）。本機用量變動**不**呼叫這個。
@@ -365,20 +374,22 @@ impl DeviceRuntime {
             }
         }
         if let Some(lc) = rt.limits.clone() {
-            // 額度只由啟動、定時與手動觸發；絕不跟著本機用量（上游 limits/runtime.js 的規則）。
+            // 額度只由啟動、定時、重置點、（自適應時）額度本身的消耗速度與手動觸發；
+            // 絕不跟著本機用量（上游 limits/runtime.js 的規則）。序列執行：一次醒來探測完才排下一次。
             let rt3 = rt.clone();
             tasks.push(tokio::spawn(async move {
                 let mut lr = LimitsRuntime::new(lc);
+                let mut wake = LimitsWake::Full;
                 loop {
-                    let wait = tokio::select! {
-                        w = rt3.run_limits_round(&mut lr) => w,
+                    let (wait, next) = tokio::select! {
+                        r = rt3.run_limits_round(&mut lr, wake) => r,
                         _ = rt3.cancel.cancelled() => break,
                     };
-                    tokio::select! {
-                        _ = tokio::time::sleep(wait) => {}
-                        _ = rt3.limits_refresh.notified() => {}
+                    wake = tokio::select! {
+                        _ = tokio::time::sleep(wait) => next,
+                        _ = rt3.limits_refresh.notified() => LimitsWake::Full,
                         _ = rt3.cancel.cancelled() => break,
-                    }
+                    };
                 }
             }));
         }
@@ -832,7 +843,7 @@ impl DeviceRuntime {
         let mut published = rt.do_tick(reason).await?;
         // 上游 runAgentOnce：掃描之後、上傳之前探測一次額度（startup-once）。
         if let Some(lc) = rt.limits.clone() {
-            let (summary, _) = LimitsRuntime::new(lc).probe_all().await;
+            let summary = LimitsRuntime::new(lc).probe_all().await;
             if let Some(p) = rt.state.lock().unwrap().update_limits(summary) {
                 published = p;
             }

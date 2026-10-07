@@ -32,6 +32,7 @@ const RUNTIME_FIELDS: &[&str] = &[
     "limitsEnabled",
     "limitProviders",
     "limitsRefreshMs",
+    "limitsRefreshMode",
 ];
 
 fn save(state: &AppState, next: Settings) -> AppResult<()> {

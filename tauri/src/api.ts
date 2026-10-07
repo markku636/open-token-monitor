@@ -38,6 +38,8 @@ export interface Settings {
   limitsEnabled: boolean;
   limitProviders: string[];
   limitsRefreshMs: number;
+  /** `fixed` = 每 limitsRefreshMs；`adaptive` = 每 5 分鐘，快用完的額度提早（最快每分鐘）。 */
+  limitsRefreshMode: "fixed" | "adaptive";
   language: "auto" | "zh-TW" | "en";
   theme: ThemeSetting;
   automaticAppUpdates: boolean;
@@ -94,6 +96,7 @@ export type SettingsPatch = Partial<
     | "limitsEnabled"
     | "limitProviders"
     | "limitsRefreshMs"
+    | "limitsRefreshMode"
     | "windowMode"
     | "keepAboveTaskbar"
     | "floatingBubbleEnabled"
@@ -847,6 +850,7 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     limitsEnabled: true,
     limitProviders: ["claude", "codex"],
     limitsRefreshMs: 300_000,
+    limitsRefreshMode: "fixed",
     language: "auto",
     theme: "system",
     automaticAppUpdates: true,

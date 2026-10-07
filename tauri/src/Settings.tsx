@@ -20,7 +20,7 @@ import { useApp } from "./store";
 import { t } from "./i18n";
 import { Button, Field, Section, Segmented, Select, Toggle } from "./ui";
 import { updateStatusText } from "./update";
-import { providerName } from "./limits";
+import { limitsRefreshPatch, limitsRefreshSelectValue, providerName } from "./limits";
 import { DisplaySection } from "./SettingsDisplay";
 import { ExportSection } from "./SettingsExport";
 import { notesOf, ReleaseNotes } from "./UpdatePill";
@@ -648,17 +648,21 @@ export default function Settings() {
           </Field>
           {s.limitsEnabled && (
             <>
-              <Field label={t("查詢間隔")}>
-                <Select<number>
-                  value={s.limitsRefreshMs}
+              <Field
+                label={t("查詢間隔")}
+                hint={s.limitsRefreshMode === "adaptive" ? t("根據額度消耗速度自動調整更新頻率：通常每 5 分鐘，必要時最快每分鐘一次。") : undefined}
+              >
+                <Select<string>
+                  value={limitsRefreshSelectValue(s)}
                   options={[
-                    { value: 60_000, label: t("1 分鐘") },
-                    { value: 120_000, label: t("2 分鐘") },
-                    { value: 300_000, label: t("5 分鐘") },
-                    { value: 900_000, label: t("15 分鐘") },
-                    { value: 1_800_000, label: t("30 分鐘") },
+                    { value: "adaptive", label: t("自適應") },
+                    { value: "60000", label: t("1 分鐘") },
+                    { value: "120000", label: t("2 分鐘") },
+                    { value: "300000", label: t("5 分鐘") },
+                    { value: "900000", label: t("15 分鐘") },
+                    { value: "1800000", label: t("30 分鐘") },
                   ]}
-                  onChange={(v) => void updateSettings({ limitsRefreshMs: v })}
+                  onChange={(v) => void updateSettings(limitsRefreshPatch(v))}
                 />
               </Field>
               {s.limitProviders.includes("cursor") && <CursorTokenField />}

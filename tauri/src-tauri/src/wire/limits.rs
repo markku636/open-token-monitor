@@ -44,6 +44,16 @@ pub enum WindowKind {
 }
 
 impl WindowKind {
+    /// wire 上的字串（serde 的 lowercase）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WindowKind::Session => "session",
+            WindowKind::Daily => "daily",
+            WindowKind::Weekly => "weekly",
+            WindowKind::Billing => "billing",
+        }
+    }
+
     /// 上游 WINDOW_ORDER 的位置。
     pub fn rank(self) -> usize {
         match self {
