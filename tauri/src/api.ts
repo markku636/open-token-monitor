@@ -186,6 +186,10 @@ export interface AppStatus {
   selfSync: Record<string, SyncReport>;
   watching: boolean;
   watchRoots: string[];
+  /** 原生事件或每 2 秒輪詢（`TOKEN_MONITOR_WATCH_POLLING`，或系統的監看額度用完）。 */
+  watchMode: "native" | "polling" | null;
+  /** 改成輪詢的原因（`ENOSPC` / `EMFILE` / `ENFILE`）；主動設定輪詢時為 null。 */
+  watchFallbackCode: string | null;
   watchError: string | null;
   hubStream: HubStreamState | null;
   hubStreamError: string | null;
@@ -911,6 +915,8 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
         selfSync: { cursor: { client: "cursor", state: "notSignedIn", at: now } },
         watching: true,
         watchRoots: [String.raw`C:\Users\preview\.claude\projects`],
+        watchMode: "native",
+        watchFallbackCode: null,
         watchError: null,
         hubStream: "connected",
         hubStreamError: null,

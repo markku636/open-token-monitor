@@ -39,7 +39,7 @@ use tokio_util::sync::CancellationToken;
 use super::events::{CoreEvent, ErrorInfo, EventSink};
 use super::sink::{OrderedSink, SendFn};
 use super::state::{DeviceState, Published};
-use crate::collector::watch::{self, WatchRoot};
+use crate::collector::watch::{self, PollingPolicy, Signal, StartError, WatchMode, WatchRoot};
 use crate::collector::{
     collect_anchored, collect_history, collect_once, local_today_key, Anchor, Collected,
     CollectorConfig, ProgressFn, ScanProgress, ScanSource,
@@ -61,25 +61,33 @@ pub const HISTORY_ROLLOVER_RETRY: Duration = Duration::from_secs(60);
 /// 檔案監看的設定；`None` = 只靠定時 tick。
 #[derive(Debug, Clone)]
 pub struct WatchConfig {
-    pub roots: Vec<WatchRoot>,
+    pub tracked_clients: Vec<String>,
+    pub custom_scan_paths: indexmap::IndexMap<String, Vec<String>>,
+    pub home: std::path::PathBuf,
     pub debounce: Duration,
+    /// 原生事件或輪詢（`TOKEN_MONITOR_WATCH_POLLING`，見 collector/watch.rs）。
+    pub polling: PollingPolicy,
 }
 
 impl WatchConfig {
-    /// GUI 與 tm-agent 共用：依設定的追蹤工具與額外掃描目錄決定監看哪些目錄。
+    /// GUI 與 tm-agent 共用：依設定的追蹤工具與額外掃描目錄決定監看哪些目錄，
+    /// 監看方式依 `TOKEN_MONITOR_WATCH_POLLING`（上游在 collector 裡解析，兩個入口不會分岔）。
     pub fn from_settings(settings: &crate::settings::Settings) -> Option<WatchConfig> {
         if !settings.watch_enabled {
             return None;
         }
-        let home = dirs::home_dir()?;
         Some(WatchConfig {
-            roots: watch::watch_roots(
-                &settings.tracked_clients,
-                &settings.custom_scan_paths,
-                &home,
-            ),
+            tracked_clients: settings.tracked_clients.clone(),
+            custom_scan_paths: settings.custom_scan_paths.clone(),
+            home: dirs::home_dir()?,
             debounce: Duration::from_millis(settings.watch_debounce_ms),
+            polling: PollingPolicy::from_env(),
         })
+    }
+
+    /// 監看的候選根目錄。每次重新計算：Hermes 的 profile 等來源可能之後才出現。
+    pub fn roots(&self) -> Vec<WatchRoot> {
+        watch::watch_roots(&self.tracked_clients, &self.custom_scan_paths, &self.home)
     }
 }
 
@@ -212,8 +220,11 @@ pub struct DeviceRuntime {
     status: Mutex<CollectStatus>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
     watcher: Mutex<Option<watch::Watcher>>,
-    /// 監看的候選根目錄與事件通道；完整掃描後據此重新監看新出現的目錄。
-    watch_roots: Mutex<Option<(Vec<WatchRoot>, mpsc::UnboundedSender<()>)>>,
+    /// 監看設定與事件通道；完整掃描後據此重新監看新出現的目錄。
+    watch_cfg: Mutex<Option<(WatchConfig, mpsc::UnboundedSender<Signal>)>>,
+    /// 原生事件或輪詢；描述符耗盡後改為輪詢，這個 runtime 剩下的時間都不變（上游 sticky 的
+    /// `watchDescriptorFallback`）。
+    watch_policy: Mutex<PollingPolicy>,
     limits: Option<LimitsConfig>,
     limits_refresh: Notify,
     history_interval: Duration,
@@ -263,7 +274,8 @@ impl DeviceRuntime {
             status: Mutex::new(CollectStatus::default()),
             tasks: Mutex::new(Vec::new()),
             watcher: Mutex::new(None),
-            watch_roots: Mutex::new(None),
+            watch_cfg: Mutex::new(None),
+            watch_policy: Mutex::new(PollingPolicy::default()),
             limits: cfg.limits,
             limits_refresh: Notify::new(),
             history_interval: cfg.history_interval,
@@ -403,36 +415,80 @@ impl DeviceRuntime {
         rt
     }
 
-    /// 以目前存在的根目錄（重新）建立 notify watcher。監看不了就回報，只靠定時 tick。
-    fn arm_watcher(&self, roots: &[WatchRoot], tx: mpsc::UnboundedSender<()>) {
-        match watch::start(roots.to_vec(), move || {
-            let _ = tx.send(());
-        }) {
-            Ok(w) => {
-                tracing::info!(roots = w.watched.len(), "watching source dirs");
-                (self.events)(CoreEvent::WatcherReady {
-                    roots: w.watched.iter().map(|p| p.display().to_string()).collect(),
-                });
-                *self.watcher.lock().unwrap() = Some(w);
+    /// 以目前存在的根目錄（重新）建立監看。原生監看拿不到描述符時改用輪詢重來一次（上游
+    /// `handleWatchError`）；還是監看不了就回報，只靠定時 tick。
+    fn arm_watcher(&self, roots: &[WatchRoot], tx: &mpsc::UnboundedSender<Signal>) {
+        // 先放掉舊的：描述符不夠時新舊兩組同時存在只會更糟（上游 closeWatchers 在重建之前）。
+        self.watcher.lock().unwrap().take();
+        loop {
+            let (mode, fallback) = {
+                let policy = self.watch_policy.lock().unwrap();
+                (policy.mode(), policy.fallback)
+            };
+            let sender = tx.clone();
+            match watch::start(roots.to_vec(), mode, move |signal| {
+                let _ = sender.send(signal);
+            }) {
+                Ok(w) => {
+                    let how = match w.mode {
+                        WatchMode::Native => "native events",
+                        WatchMode::Polling => "polling 2s",
+                    };
+                    for dir in &w.watched {
+                        tracing::info!(dir = %dir.display(), "watching source dir ({how})");
+                    }
+                    (self.events)(CoreEvent::WatcherReady {
+                        roots: w.watched.iter().map(|p| p.display().to_string()).collect(),
+                        mode: w.mode,
+                        fallback_code: fallback.map(str::to_string),
+                    });
+                    *self.watcher.lock().unwrap() = Some(w);
+                    return;
+                }
+                Err(StartError::Exhausted(code))
+                    if self.watch_policy.lock().unwrap().on_exhausted(code) =>
+                {
+                    tracing::warn!(
+                        code,
+                        "native file events unavailable; falling back to 2s polling"
+                    );
+                }
+                Err(error) => {
+                    let error = error.to_string();
+                    tracing::warn!(%error, "file watching unavailable; interval ticks only");
+                    (self.events)(CoreEvent::WatcherUnavailable { error });
+                    return;
+                }
             }
-            Err(error) => {
-                tracing::warn!(%error, "file watching unavailable; interval ticks only");
-                self.watcher.lock().unwrap().take();
-                (self.events)(CoreEvent::WatcherUnavailable { error });
-            }
+        }
+    }
+
+    /// 執行中的原生監看拿不到描述符（例如 inotify 為新目錄加監看時）：改用輪詢重建一次。
+    fn on_watch_exhausted(&self, code: &'static str) {
+        if !self.watch_policy.lock().unwrap().on_exhausted(code) {
+            return;
+        }
+        tracing::warn!(
+            code,
+            "native file events unavailable; falling back to 2s polling"
+        );
+        let guard = self.watch_cfg.lock().unwrap();
+        if let Some((wc, tx)) = guard.as_ref() {
+            self.arm_watcher(&wc.roots(), tx);
         }
     }
 
     /// 完整掃描後：工具的資料夾在啟動之後才出現（或消失）時重新監看，新工具不必等到重開程式才有
     /// 即時更新（上游 collector.js 在 full tick 後的 `setupWatchers`）。
     fn rearm_watcher_if_roots_changed(&self) {
-        let guard = self.watch_roots.lock().unwrap();
-        let Some((roots, tx)) = guard.as_ref() else {
+        let guard = self.watch_cfg.lock().unwrap();
+        let Some((wc, tx)) = guard.as_ref() else {
             return;
         };
+        let roots = wc.roots();
         let mut existing: Vec<std::path::PathBuf> = roots
             .iter()
-            .filter(|r| r.dir.exists())
+            .filter(|r| r.dir.is_dir())
             .map(|r| r.dir.clone())
             .collect();
         let mut current = self
@@ -454,25 +510,37 @@ impl DeviceRuntime {
             now = existing.len(),
             "source dirs changed; re-arming the watcher"
         );
-        self.arm_watcher(roots, tx.clone());
+        self.arm_watcher(&roots, tx);
     }
 
     /// 啟動檔案監看與防抖任務。一開始一個目錄都沒有也照樣起防抖任務，之後出現的目錄才接得上。
     fn start_watching(self: Arc<Self>, wc: WatchConfig) -> Option<JoinHandle<()>> {
-        let (tx, mut rx) = mpsc::unbounded_channel::<()>();
-        self.arm_watcher(&wc.roots, tx.clone());
-        *self.watch_roots.lock().unwrap() = Some((wc.roots.clone(), tx));
+        let (tx, mut rx) = mpsc::unbounded_channel::<Signal>();
+        *self.watch_policy.lock().unwrap() = wc.polling.clone();
+        self.arm_watcher(&wc.roots(), &tx);
         let debounce = wc.debounce;
+        *self.watch_cfg.lock().unwrap() = Some((wc, tx));
         Some(tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    got = rx.recv() => if got.is_none() { break },
+                    got = rx.recv() => match got {
+                        None => break,
+                        Some(Signal::Exhausted(code)) => {
+                            self.on_watch_exhausted(code);
+                            continue;
+                        }
+                        Some(Signal::Change) => {}
+                    },
                     _ = self.cancel.cancelled() => break,
                 }
                 // 尾端防抖：安靜滿 `debounce` 才觸發；到點時有 tick 在跑就重新計時。
                 loop {
                     tokio::select! {
-                        got = rx.recv() => if got.is_none() { return },
+                        got = rx.recv() => match got {
+                            None => return,
+                            Some(Signal::Exhausted(code)) => self.on_watch_exhausted(code),
+                            Some(Signal::Change) => {}
+                        },
                         _ = tokio::time::sleep(debounce) => {
                             if !self.tick_in_flight.load(Ordering::SeqCst) {
                                 break;
@@ -790,7 +858,7 @@ impl DeviceRuntime {
     pub async fn stop(&self) {
         self.cancel.cancel();
         self.watcher.lock().unwrap().take();
-        self.watch_roots.lock().unwrap().take();
+        self.watch_cfg.lock().unwrap().take();
         let tasks: Vec<JoinHandle<()>> = std::mem::take(&mut *self.tasks.lock().unwrap());
         for t in tasks {
             let _ = t.await;
@@ -1007,6 +1075,7 @@ mod tests {
                     all_time_since: "2024-01-01".into(),
                     projects_enabled: false,
                     history_enabled: false,
+                    custom_scan_paths: indexmap::IndexMap::new(),
                 },
                 source: ScanSource::Fixtures(dir.into()),
                 collection_interval: Duration::from_secs(300),
@@ -1046,6 +1115,112 @@ mod tests {
             seen.lock().unwrap()[1..],
             [(2, 5, 14, 104), (3, 5, 20, 104), (4, 5, 20, 200)]
         );
+    }
+
+    type Modes = Arc<Mutex<Vec<(WatchMode, Option<String>)>>>;
+
+    /// 每一次 WatcherReady 的 (mode, fallbackCode)。
+    fn watcher_recorder() -> (Modes, EventSink) {
+        let seen: Modes = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let events: EventSink = Arc::new(move |event| {
+            if let CoreEvent::WatcherReady {
+                mode,
+                fallback_code,
+                ..
+            } = event
+            {
+                sink.lock().unwrap().push((mode, fallback_code));
+            }
+        });
+        (seen, events)
+    }
+
+    fn watch_config(dir: &std::path::Path, polling: PollingPolicy) -> WatchConfig {
+        let extra = dir.join("extra");
+        std::fs::create_dir_all(&extra).unwrap();
+        let mut custom = indexmap::IndexMap::new();
+        custom.insert(
+            "claude".to_string(),
+            vec![extra.to_string_lossy().into_owned()],
+        );
+        WatchConfig {
+            tracked_clients: vec!["claude".into()],
+            custom_scan_paths: custom,
+            home: dir.join("home"),
+            debounce: Duration::from_millis(50),
+            polling,
+        }
+    }
+
+    #[tokio::test]
+    async fn descriptor_exhaustion_rebuilds_the_watcher_on_polling_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let (seen, events) = watcher_recorder();
+        let rt = Arc::new(fixture_runtime(dir.path(), events, None, false));
+        let task = rt
+            .clone()
+            .start_watching(watch_config(dir.path(), PollingPolicy::default()))
+            .unwrap();
+        assert_eq!(*seen.lock().unwrap(), vec![(WatchMode::Native, None)]);
+
+        // inotify 在執行中為新目錄加監看時撞到額度（notify 的 MaxFilesWatch）。
+        let tx = rt.watch_cfg.lock().unwrap().as_ref().unwrap().1.clone();
+        tx.send(Signal::Exhausted("ENOSPC")).unwrap();
+        tx.send(Signal::Exhausted("EMFILE")).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while seen.lock().unwrap().len() < 2 && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![
+                (WatchMode::Native, None),
+                (WatchMode::Polling, Some("ENOSPC".into()))
+            ],
+            "rebuilt once, on polling, and it stays there"
+        );
+        assert_eq!(
+            rt.watcher.lock().unwrap().as_ref().map(|w| w.mode),
+            Some(WatchMode::Polling)
+        );
+        rt.cancel.cancel();
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_polling_override_is_honoured_both_ways() {
+        let dir = tempfile::tempdir().unwrap();
+        let (seen, events) = watcher_recorder();
+        let rt = Arc::new(fixture_runtime(dir.path(), events, None, false));
+        let task = rt
+            .clone()
+            .start_watching(watch_config(
+                dir.path(),
+                PollingPolicy::from_override(Some(true)),
+            ))
+            .unwrap();
+        assert_eq!(*seen.lock().unwrap(), vec![(WatchMode::Polling, None)]);
+        rt.cancel.cancel();
+        task.await.unwrap();
+
+        // `TOKEN_MONITOR_WATCH_POLLING=0`：額度用完也不改輪詢。
+        let (seen, events) = watcher_recorder();
+        let rt = Arc::new(fixture_runtime(dir.path(), events, None, false));
+        let task = rt
+            .clone()
+            .start_watching(watch_config(
+                dir.path(),
+                PollingPolicy::from_override(Some(false)),
+            ))
+            .unwrap();
+        let tx = rt.watch_cfg.lock().unwrap().as_ref().unwrap().1.clone();
+        tx.send(Signal::Exhausted("ENOSPC")).unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(*seen.lock().unwrap(), vec![(WatchMode::Native, None)]);
+        rt.cancel.cancel();
+        task.await.unwrap();
     }
 
     #[tokio::test]

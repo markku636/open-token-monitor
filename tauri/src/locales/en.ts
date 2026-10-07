@@ -135,6 +135,8 @@ export const EN: Record<string, string> = {
   "關閉時只依「定時掃描間隔」更新": "When off, numbers update only on the scheduled scan",
   "無法監看：{e}（改為定時掃描）": "Cannot watch: {e} (falling back to scheduled scans)",
   "監看 {n} 個資料夾，有變動時幾秒內更新": "Watching {n} folders; updates within seconds of a change",
+  "每 2 秒檢查 {n} 個資料夾，有變動時幾秒內更新": "Checking {n} folders every 2 seconds; updates within seconds of a change",
+  "系統的檔案監看額度已用完（{code}），改為每 2 秒檢查 {n} 個資料夾": "The system ran out of file watches ({code}); checking {n} folders every 2 seconds instead",
   "工具的紀錄有變動時幾秒內更新": "Updates within seconds when a tool writes new usage",
   "專案（資料夾）統計": "Project (folder) statistics",
   "關閉後不會上傳專案資料夾名稱": "When off, project folder names are not uploaded",

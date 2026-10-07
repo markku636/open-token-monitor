@@ -123,14 +123,22 @@ fn on_core_event(app: &AppHandle, event: CoreEvent) {
         CoreEvent::UploadScheduled { next_at } => {
             update_status(app, |s| s.next_upload_at = Some(next_at))
         }
-        CoreEvent::WatcherReady { roots } => update_status(app, |s| {
+        CoreEvent::WatcherReady {
+            roots,
+            mode,
+            fallback_code,
+        } => update_status(app, |s| {
             s.watching = true;
             s.watch_roots = roots;
+            s.watch_mode = Some(mode);
+            s.watch_fallback_code = fallback_code;
             s.watch_error = None;
         }),
         CoreEvent::WatcherUnavailable { error } => update_status(app, |s| {
             s.watching = false;
             s.watch_roots.clear();
+            s.watch_mode = None;
+            s.watch_fallback_code = None;
             s.watch_error = Some(error);
         }),
         CoreEvent::LimitsUpdated { summary, next_at } => {
@@ -214,6 +222,8 @@ pub async fn restart_runtime(app: &AppHandle) {
         // 新的 runtime 會重新回報監看狀態（WatcherReady / WatcherUnavailable）。
         s.watching = false;
         s.watch_roots.clear();
+        s.watch_mode = None;
+        s.watch_fallback_code = None;
         s.watch_error = None;
         s.hub_stream = None;
         s.hub_stream_error = None;

@@ -41,6 +41,10 @@ pub struct AppStatus {
     /// 是否正在監看來源目錄（有變動時 3–5 秒內更新）。
     pub watching: bool,
     pub watch_roots: Vec<String>,
+    /// 原生事件或每 2 秒輪詢（監看中才有）。
+    pub watch_mode: Option<crate::collector::watch::WatchMode>,
+    /// 系統拒絕給監看描述符而改成輪詢的原因（`ENOSPC` 等）。
+    pub watch_fallback_code: Option<String>,
     /// 監看無法啟動的原因（只靠定時掃描）。
     pub watch_error: Option<String>,
     /// 全公司串流（`/api/stats/stream`）的狀態；沒有設定 hub 時為 `None`。

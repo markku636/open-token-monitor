@@ -36,6 +36,9 @@ pub struct CollectorConfig {
     pub projects_enabled: bool,
     /// 上傳 history（上游 `historyEnabled`，預設開）。關閉時每筆 record 都送 `history: null`。
     pub history_enabled: bool,
+    /// client → 額外的掃描目錄；存在就算那個工具「裝了」（`clientStatus` 的 waiting，上游
+    /// `clientSourceRoots` 的 custom-scan-path）。
+    pub custom_scan_paths: IndexMap<String, Vec<String>>,
 }
 
 /// 用量資料的來源：真正的 tokscale，或測試用的固定 JSON 目錄
@@ -53,6 +56,7 @@ impl CollectorConfig {
             all_time_since: settings.all_time_since.clone(),
             projects_enabled: settings.projects_enabled,
             history_enabled: settings.history_enabled,
+            custom_scan_paths: settings.custom_scan_paths.clone(),
         }
     }
 }
@@ -103,14 +107,15 @@ fn read_fixture(dir: &std::path::Path, stem: &str, missing: Value) -> AppResult<
     }
 }
 
-fn client_status(clients: &[String], all_time: &Period) -> IndexMap<String, ClientStatus> {
+/// 上游 `statusFromSignals`：有 allTime 用量 = active；否則任何一個來源存在 = waiting；都沒有 = missing。
+fn client_status(cfg: &CollectorConfig, all_time: &Period) -> IndexMap<String, ClientStatus> {
     let home = dirs::home_dir().unwrap_or_default();
-    clients
+    cfg.tracked_clients
         .iter()
         .map(|c| {
             let status = if all_time.clients.get(c).copied().unwrap_or(0) > 0 {
                 ClientStatus::Active
-            } else if roots::client_present(c, &home) {
+            } else if roots::client_present(c, &home, &cfg.custom_scan_paths) {
                 ClientStatus::Waiting
             } else {
                 ClientStatus::Missing
@@ -311,7 +316,7 @@ pub(crate) fn summary_of(
         updated_at: iso_millis(collected_at.with_timezone(&Utc)),
         projects_enabled: cfg.projects_enabled,
         tracked_clients: cfg.tracked_clients.clone(),
-        client_status: client_status(&cfg.tracked_clients, &all_time),
+        client_status: client_status(cfg, &all_time),
         period_windows: PeriodWindows::compute(collected_at),
         history_available: cfg.history_enabled,
         today,
@@ -486,6 +491,7 @@ mod tests {
             all_time_since: "2024-01-01".into(),
             projects_enabled: true,
             history_enabled: true,
+            custom_scan_paths: IndexMap::new(),
         };
         let seen = std::sync::Mutex::new(Vec::new());
         let progress = |p: ScanProgress<'_>| {

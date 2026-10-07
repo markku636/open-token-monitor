@@ -3,7 +3,8 @@
 //! 與 GUI 共用設定目錄、deviceId 與內建的 hub 設定。環境變數名稱沿用上游 agent，
 //! 讓既有的排程腳本不必改：`TOKEN_MONITOR_HUB_URL`、`TOKEN_MONITOR_SECRET`、
 //! `TOKEN_MONITOR_DEVICE_ID`、`TOKEN_MONITOR_CLIENTS`、`TOKEN_MONITOR_INTERVAL_MS`、
-//! `TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS`、`TOKEN_MONITOR_ALL_TIME_SINCE`。
+//! `TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS`、`TOKEN_MONITOR_ALL_TIME_SINCE`、`TOKEN_MONITOR_WATCH_POLLING`
+//! （在 `WatchConfig::from_settings` 讀，GUI 也一樣）。
 //!
 //! 同一台電腦不要同時跑 GUI 與 `tm-agent run`：兩者用同一個 deviceId，會輪流覆蓋對方的上傳。
 
@@ -117,7 +118,8 @@ enum Command {
         /// 每個核心事件印一行 JSON 到 stdout
         #[arg(long)]
         events: bool,
-        /// 監看來源目錄、有變動就更新；`0` 關閉（與上游 agent 相同）
+        /// 監看來源目錄、有變動就更新；`0` 關閉（與上游 agent 相同）。
+        /// 原生事件或每 2 秒輪詢由 `TOKEN_MONITOR_WATCH_POLLING` 決定（上游同名，只有環境變數）
         #[arg(long, env = "TOKEN_MONITOR_WATCH")]
         watch: Option<String>,
         /// 檔案事件的防抖（毫秒）

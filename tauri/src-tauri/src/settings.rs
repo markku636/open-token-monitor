@@ -595,7 +595,10 @@ fn normalize_custom_scan_paths(
         let Some(id) = normalize_client_name(client) else {
             continue;
         };
-        if !SUPPORTED_CLIENTS.contains(&id.as_str()) {
+        // 上游 `UNSUPPORTED_CUSTOM_SCAN_CLIENTS`：OpenCode 的新版 SQLite 不走 TOKSCALE_EXTRA_DIRS，
+        // Cursor 只讀 tokscale 自己產生的 cache。收下只會看起來正常卻沒有用量（也會被當成「已安裝」）。
+        if !SUPPORTED_CLIENTS.contains(&id.as_str()) || matches!(id.as_str(), "opencode" | "cursor")
+        {
             continue;
         }
         let entry = out.entry(id).or_default();
@@ -769,6 +772,20 @@ mod tests {
         assert_eq!(normalize_window_toggle_shortcut("Ctrl+F25"), "");
         assert_eq!(normalize_window_toggle_shortcut("Alt+space"), "Alt+Space");
         assert_eq!(normalize_window_toggle_shortcut(""), "");
+    }
+
+    #[test]
+    fn custom_scan_paths_skip_clients_tokscale_cannot_extend() {
+        let dir = if cfg!(windows) { "C:\\extra" } else { "/extra" };
+        let mut value = IndexMap::new();
+        for client in ["claude", "cursor", "opencode", "antigravity"] {
+            value.insert(client.to_string(), vec![dir.to_string()]);
+        }
+        let out = normalize_custom_scan_paths(&value);
+        assert_eq!(
+            out.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["claude", "antigravity"]
+        );
     }
 
     #[test]

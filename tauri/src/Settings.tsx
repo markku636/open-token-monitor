@@ -270,7 +270,16 @@ function watchNote(s: SettingsView, appStatus: AppStatus | null): string {
   if (!s.watchEnabled) return t("關閉時只依「定時掃描間隔」更新");
   if (appStatus?.watchError) return t("無法監看：{e}（改為定時掃描）", { e: appStatus.watchError });
   if (appStatus?.watching) {
-    return t("監看 {n} 個資料夾，有變動時幾秒內更新", { n: appStatus.watchRoots.length });
+    const n = appStatus.watchRoots.length;
+    if (appStatus.watchMode === "polling") {
+      return appStatus.watchFallbackCode
+        ? t("系統的檔案監看額度已用完（{code}），改為每 2 秒檢查 {n} 個資料夾", {
+            code: appStatus.watchFallbackCode,
+            n,
+          })
+        : t("每 2 秒檢查 {n} 個資料夾，有變動時幾秒內更新", { n });
+    }
+    return t("監看 {n} 個資料夾，有變動時幾秒內更新", { n });
   }
   return t("工具的紀錄有變動時幾秒內更新");
 }

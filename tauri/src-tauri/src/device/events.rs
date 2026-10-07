@@ -62,9 +62,14 @@ pub enum CoreEvent {
     /// 掃描前的 Cursor / Antigravity 同步結果（只在這次真的有嘗試時發出）。
     #[serde(rename_all = "camelCase")]
     SelfSync { reports: Vec<SyncReport> },
-    /// 檔案監看已啟動：來源目錄有變動時 3–5 秒內更新。
+    /// 檔案監看已啟動：來源目錄有變動時 3–5 秒內更新。`mode` 是原生事件或每 2 秒輪詢；
+    /// `fallback_code` 是系統拒絕給監看描述符而改成輪詢的原因（`ENOSPC` 等，上游 `watchFallbackCode`）。
     #[serde(rename_all = "camelCase")]
-    WatcherReady { roots: Vec<String> },
+    WatcherReady {
+        roots: Vec<String>,
+        mode: crate::collector::watch::WatchMode,
+        fallback_code: Option<String>,
+    },
     /// 檔案監看無法啟動（沒有來源目錄或系統拒絕），只靠定時掃描。
     #[serde(rename_all = "camelCase")]
     WatcherUnavailable { error: String },
