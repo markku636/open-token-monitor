@@ -83,8 +83,9 @@ keyring = { version = "3", features = ["windows-native"] }
 # osName / osVersion：讀 HKLM\...\Windows NT\CurrentVersion（對齊上游 src/shared/osVersion.js）。
 winreg = "0.55"
 # 工作列上方重新置頂（gui/taskbar.rs）與圓角（gui/chrome.rs）：SetWindowPos、前景事件 hook、
-# DwmSetWindowAttribute。與 tao / tauri 同一個版本與 feature 集合，沒有多編譯任何東西。
-windows = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
+# DwmSetWindowAttribute；常駐 tm-agent 的存活檢查（gui/agent.rs：OpenProcess、GetExitCodeProcess）。
+# 與 tao / tauri 同一個版本與 feature 集合（tao 本來就開 Win32_System_Threading），沒有多編譯任何東西。
+windows = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }

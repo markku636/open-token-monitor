@@ -1,5 +1,6 @@
 //! 裝置層：把收集器的產出變成帶 revision 的 record，照上傳節奏交給 hub。
 
+pub mod agent_pid;
 pub mod events;
 pub mod runtime;
 pub mod sink;

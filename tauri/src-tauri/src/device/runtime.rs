@@ -21,6 +21,10 @@
 //! session usage archive（usage/archive.rs）在收集之後、發佈之前套用：記住這次的 session，再把
 //! client 已經刪掉的補回來。錨點是套用前的原始結果，精確 delta 不受影響。
 //!
+//! 常駐的 tm-agent 在跑時（`external_agent`，device/agent_pid.rs），GUI 讓出兩個 archive 的寫入：
+//! session archive 每次從檔案重新讀 agent 寫的內容再補回、不記錄，daily history archive 只讀不寫
+//! （上游 main.js `summaryWithArchivedClientUsage` 與 `dailyHistoryArchiveWriteEnabled`）。
+//!
 //! 上傳節奏（`syncUploadIntervalMs`）：
 //! - `0`：每次有新 record 就送（即時）。
 //! - 其他：第一筆立刻送（裝好馬上出現在 dashboard），之後每個間隔送一次最新的 record。
@@ -36,6 +40,7 @@ use tokio::sync::{mpsc, Notify};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use super::agent_pid::ExternalAgentProbe;
 use super::events::{CoreEvent, ErrorInfo, EventSink};
 use super::sink::{OrderedSink, SendFn};
 use super::state::{DeviceState, Published};
@@ -99,6 +104,8 @@ pub struct RuntimeConfig {
     pub session_archive: Option<std::path::PathBuf>,
     /// 是否把 archive 的變動寫回檔案；dry run 為 false（只讀、照樣補回）。
     pub archive_writes: bool,
+    /// 常駐的 tm-agent 在跑嗎（GUI 注入；`None` = 自己就是 agent）。在跑時兩個 archive 都讓給它寫。
+    pub external_agent: Option<ExternalAgentProbe>,
     /// 持久化的錨點（`collector-anchor.json`）；`None` = 不讀不寫（`once` 與 dry run，上游
     /// `anchorPersistenceEnabled: !once && !dryRun`）。
     pub anchor_file: Option<std::path::PathBuf>,
@@ -224,6 +231,9 @@ pub struct DeviceRuntime {
     /// daily history archive 的 JSON 檔（與 session archive 同一個開關、同一個目錄）。
     history_archive: Option<std::path::PathBuf>,
     archive_writes: bool,
+    external_agent: Option<ExternalAgentProbe>,
+    /// 上一次檢查時是否讓給常駐的 tm-agent（只用來在切換時記一行 log）。
+    yielded: AtomicBool,
     anchor_file: Option<std::path::PathBuf>,
     progressive: bool,
 }
@@ -274,6 +284,8 @@ impl DeviceRuntime {
                     .map(|d| d.join(crate::usage::history_archive::HISTORY_ARCHIVE_FILE))
             }),
             archive_writes: cfg.archive_writes,
+            external_agent: cfg.external_agent,
+            yielded: AtomicBool::new(false),
             anchor_file: cfg.anchor_file.clone(),
             progressive: cfg.progressive,
             archive: Mutex::new(cfg.session_archive.as_deref().and_then(|path| {
@@ -594,16 +606,36 @@ impl DeviceRuntime {
         self.archive_projection(summary, true)
     }
 
-    /// `capture` = 同時記下這次的觀察；預覽與開機畫面只補不記。
+    /// 常駐的 tm-agent 正在跑（上游 `isExternalAgentActive`）：archive 讓給它寫。每次都重新檢查
+    /// （讀 PID 檔、問作業系統），agent 結束後下一個 tick 就收回寫入。
+    fn yields_to_agent(&self) -> bool {
+        let active = self.external_agent.as_ref().is_some_and(|probe| probe());
+        if self.yielded.swap(active, Ordering::SeqCst) != active {
+            if active {
+                tracing::info!("tm-agent is running; session and history archives are read-only");
+            } else {
+                tracing::info!("tm-agent stopped; writing the archives again");
+            }
+        }
+        active
+    }
+
+    /// `capture` = 同時記下這次的觀察；預覽與開機畫面只補不記。常駐的 tm-agent 在跑時也不記，
+    /// 改成從檔案重讀它寫的內容（上游 `sessionUsageArchiveStore.refresh`）。
     fn archive_projection(&self, mut summary: UsageSummary, capture: bool) -> UsageSummary {
         let mut guard = self.archive.lock().unwrap();
         let Some(store) = guard.as_mut() else {
             return summary;
         };
+        let yielded = self.yields_to_agent();
         let at = chrono::DateTime::parse_from_rfc3339(&summary.updated_at)
             .map(|d| CaptureAt::from_local(d.with_timezone(&chrono::Local)))
             .unwrap_or_else(|_| CaptureAt::from_local(chrono::Local::now()));
-        if capture {
+        if yielded {
+            if let Err(e) = store.refresh() {
+                tracing::warn!(error = %e, "session usage archive refresh failed");
+            }
+        } else if capture {
             if let Err(e) = store.capture(&summary, &at) {
                 tracing::warn!(error = %e, "session usage archive update failed");
             }
@@ -675,13 +707,14 @@ impl DeviceRuntime {
     /// 掃 history 並發佈。`Ok(None)` = graph 沒有任何一天（不送 history）。
     async fn collect_history_step(&self, today_key: &str) -> AppResult<Option<Published>> {
         let started = Instant::now();
+        let writes = || self.archive_writes && !self.yields_to_agent();
         match collect_history(
             &self.source,
             &self.collector,
             today_key,
             self.history_archive
                 .as_deref()
-                .map(|p| (p, self.archive_writes)),
+                .map(|p| (p, &writes as &(dyn Fn() -> bool + Sync))),
             &self.cancel,
         )
         .await
@@ -764,6 +797,18 @@ impl DeviceRuntime {
     /// 要求立刻完整重掃（進行中的 tick 結束後馬上再跑一次）。
     pub fn request_rescan(&self) {
         self.rescan.notify_one();
+    }
+
+    /// 清除保留的 session 與每日歷史（上游 `sessionUsageArchive:clear`），記憶體裡的 archive 一起清，
+    /// 接著完整重掃（含 history）：下一筆 record 就沒有補回來的 session 與日子。上游是整個重啟
+    /// runtime；這裡只重掃，不會連帶重新探測額度。常駐 tm-agent 在跑時由呼叫端先拒絕。
+    pub fn clear_archives(&self, dir: &std::path::Path) -> AppResult<()> {
+        {
+            let mut guard = self.archive.lock().unwrap();
+            crate::usage::clear_retained_archives(dir, guard.as_mut())?;
+        }
+        self.request_rescan();
+        Ok(())
     }
 
     pub fn snapshot(&self) -> Option<Arc<DeviceRecord>> {
@@ -1017,6 +1062,7 @@ mod tests {
                 history_interval: Duration::from_secs(900),
                 session_archive: None,
                 archive_writes: false,
+                external_agent: None,
                 anchor_file,
                 limits: None,
                 progressive: true,
@@ -1024,6 +1070,161 @@ mod tests {
             },
             None,
         )
+    }
+
+    /// 三個期間都是同一組 claude session（id, input tokens）。
+    fn write_sessions(dir: &std::path::Path, sessions: &[(&str, i64)]) {
+        let rows: Vec<serde_json::Value> = sessions
+            .iter()
+            .map(|(id, tokens)| {
+                serde_json::json!({ "client": "claude", "sessionId": id, "model": "m", "input": tokens })
+            })
+            .collect();
+        let body = serde_json::json!({ "entries": rows }).to_string();
+        for name in ["today.json", "month.json", "alltime.json"] {
+            std::fs::write(dir.join(name), &body).unwrap();
+        }
+    }
+
+    /// session archive 放在 `config`、可選擇注入「常駐 tm-agent 在跑嗎」的 GUI runtime。
+    fn archive_runtime(
+        fixtures: &std::path::Path,
+        config: &std::path::Path,
+        external_agent: Option<ExternalAgentProbe>,
+    ) -> DeviceRuntime {
+        DeviceRuntime::build(
+            RuntimeConfig {
+                envelope: crate::identity::envelope("archive-test", "test"),
+                collector: CollectorConfig {
+                    tracked_clients: vec!["claude".into()],
+                    all_time_since: "2024-01-01".into(),
+                    projects_enabled: false,
+                    history_enabled: true,
+                },
+                source: ScanSource::Fixtures(fixtures.into()),
+                collection_interval: Duration::from_secs(300),
+                upload_interval_ms: 0,
+                sender: None,
+                events: crate::device::events::noop_sink(),
+                watch: None,
+                history_interval: Duration::from_secs(900),
+                session_archive: Some(config.join(crate::usage::archive_store::ARCHIVE_FILE)),
+                archive_writes: true,
+                external_agent,
+                anchor_file: None,
+                limits: None,
+                progressive: false,
+                seed_from_anchor: false,
+            },
+            None,
+        )
+    }
+
+    fn archived(record: &DeviceRecord) -> usize {
+        crate::usage::archive::archived_session_count(&[
+            &record.today,
+            &record.month,
+            &record.all_time,
+        ])
+    }
+
+    #[tokio::test]
+    async fn clearing_drops_retained_sessions_and_days_from_the_next_record() {
+        let fixtures = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let today = local_today_key(chrono::Local::now());
+        std::fs::write(
+            fixtures.path().join("graph.json"),
+            serde_json::json!({ "contributions": [
+                { "date": today, "activeTimeMs": 0, "clients": [
+                    { "client": "claude", "modelId": "m", "tokens": { "input": 7 }, "cost": 0, "messages": 1 }
+                ] }
+            ] })
+            .to_string(),
+        )
+        .unwrap();
+        write_sessions(fixtures.path(), &[("a", 10), ("b", 20)]);
+        let rt = archive_runtime(fixtures.path(), config.path(), None);
+        rt.do_tick_inner(TickReason::Manual).await.unwrap();
+        rt.collect_history_step(&today).await.unwrap();
+        let history_file = config
+            .path()
+            .join(crate::usage::history_archive::HISTORY_ARCHIVE_FILE);
+        assert!(history_file.exists());
+
+        // b 的 transcript 被刪了：archive 把它補回來。
+        write_sessions(fixtures.path(), &[("a", 10)]);
+        let published = rt.do_tick_inner(TickReason::Manual).await.unwrap();
+        assert_eq!(published.record.all_time.total_tokens, 30);
+        assert_eq!(archived(&published.record), 1);
+
+        rt.clear_archives(config.path()).unwrap();
+        assert!(!history_file.exists());
+        let published = rt.do_tick_inner(TickReason::Manual).await.unwrap();
+        assert_eq!(published.record.all_time.total_tokens, 10);
+        assert_eq!(archived(&published.record), 0);
+        drop(rt);
+        let reopened = ArchiveStore::open(
+            &config
+                .path()
+                .join(crate::usage::archive_store::ARCHIVE_FILE),
+        )
+        .unwrap();
+        assert_eq!(reopened.len(), 1, "only a, captured again after the clear");
+    }
+
+    #[tokio::test]
+    async fn a_running_agent_owns_the_archives() {
+        let fixtures = tempfile::tempdir().unwrap();
+        let agent_fixtures = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let today = local_today_key(chrono::Local::now());
+        let running = Arc::new(AtomicBool::new(true));
+        let probe: ExternalAgentProbe = {
+            let running = running.clone();
+            Arc::new(move || running.load(Ordering::SeqCst))
+        };
+        std::fs::write(
+            fixtures.path().join("graph.json"),
+            serde_json::json!({ "contributions": [
+                { "date": today, "activeTimeMs": 0, "clients": [
+                    { "client": "claude", "modelId": "m", "tokens": { "input": 7 }, "cost": 0, "messages": 1 }
+                ] }
+            ] })
+            .to_string(),
+        )
+        .unwrap();
+        write_sessions(fixtures.path(), &[("a", 10)]);
+        let gui = archive_runtime(fixtures.path(), config.path(), Some(probe));
+        let store_path = config
+            .path()
+            .join(crate::usage::archive_store::ARCHIVE_FILE);
+        let history_file = config
+            .path()
+            .join(crate::usage::history_archive::HISTORY_ARCHIVE_FILE);
+
+        // agent 在跑：GUI 不記錄 session，也不寫 daily history archive。
+        gui.do_tick_inner(TickReason::Manual).await.unwrap();
+        gui.collect_history_step(&today).await.unwrap();
+        assert!(ArchiveStore::open(&store_path).unwrap().is_empty());
+        assert!(!history_file.exists());
+
+        // agent 記下了 GUI 看不到的 session z：GUI 從檔案重讀、照樣補回。
+        write_sessions(agent_fixtures.path(), &[("z", 5)]);
+        archive_runtime(agent_fixtures.path(), config.path(), None)
+            .do_tick_inner(TickReason::Manual)
+            .await
+            .unwrap();
+        let published = gui.do_tick_inner(TickReason::Watch).await.unwrap();
+        assert_eq!(published.record.all_time.total_tokens, 15);
+        assert_eq!(archived(&published.record), 1);
+
+        // agent 結束：GUI 收回寫入權。
+        running.store(false, Ordering::SeqCst);
+        gui.do_tick_inner(TickReason::Manual).await.unwrap();
+        gui.collect_history_step(&today).await.unwrap();
+        assert_eq!(ArchiveStore::open(&store_path).unwrap().len(), 2);
+        assert!(history_file.exists());
     }
 
     #[tokio::test]

@@ -236,6 +236,8 @@ pub async fn restart_runtime(app: &AppHandle) {
             .session_usage_archive_enabled
             .then(|| crate::store::config_dir().join(crate::usage::archive_store::ARCHIVE_FILE)),
         archive_writes: true,
+        // 常駐的 tm-agent 在跑時兩個 archive 讓給它寫（上游 `isExternalAgentActive`）。
+        external_agent: Some(Arc::new(super::agent::external_agent_active)),
         anchor_file: Some(crate::store::config_dir().join(crate::collector::ANCHOR_FILE)),
         upload_interval_ms: settings.sync_upload_interval_ms,
         sender,

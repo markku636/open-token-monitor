@@ -400,27 +400,20 @@ pub async fn collect_anchored(
 /// 這時與失敗一樣不送 `history`（hub 保留上一份）。`today_key` 是本地日期：370 天的窗口與
 /// 連續天數都以它為準。
 ///
-/// `archive` = daily history archive 的檔案與是否寫回（usage/history_archive.rs）：先記住這次 graph
-/// 的每一天，再以 archive 重建 graph，client 刪掉紀錄的日子才不會從 history 消失（上游
-/// `retainDailyHistory`）。dry run 只讀不寫（上游 `dailyHistoryArchiveWriteEnabled: !dryRun`）。
+/// `archive` = daily history archive 的檔案與「現在可以寫回嗎」（usage/history_archive.rs）：先記住
+/// 這次 graph 的每一天，再以 archive 重建 graph，client 刪掉紀錄的日子才不會從 history 消失（上游
+/// `retainDailyHistory`）。dry run、以及常駐 tm-agent 在跑時的 GUI 只讀不寫（上游
+/// `dailyHistoryArchiveWriteEnabled`）。
 pub async fn collect_history(
     source: &ScanSource,
     cfg: &CollectorConfig,
     today_key: &str,
-    archive: Option<(&std::path::Path, bool)>,
+    archive: Option<(&std::path::Path, &(dyn Fn() -> bool + Sync))>,
     cancel: &CancellationToken,
 ) -> AppResult<Option<Value>> {
     let raw = source.graph(cfg, cancel).await?;
     let graph = match archive {
-        Some((path, write)) => {
-            let mut store = crate::usage::history_archive::HistoryArchive::load(path);
-            if store.capture(&raw, today_key) && write {
-                if let Err(e) = store.save(path) {
-                    tracing::warn!(error = %e, "daily history archive write failed");
-                }
-            }
-            store.to_graph(&raw, today_key)
-        }
+        Some((path, write)) => crate::usage::history_archive::retain(path, &raw, today_key, write),
         None => raw,
     };
     Ok(crate::usage::history::history_from_graph(&graph, today_key))

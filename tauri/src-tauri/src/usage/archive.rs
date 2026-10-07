@@ -82,6 +82,27 @@ fn session_key(s: &Session) -> Option<String> {
     (!client.is_empty() && !id.is_empty()).then(|| format!("{client}:{id}"))
 }
 
+/// 目前由 archive 補回來的 session 數（設定頁「目前保留 N 個」，上游 renderer sessionRows.js
+/// `archivedSessionCount`）：三個期間合起來、以 `client:sessionId` 去重。上游另外把 `deleted` /
+/// `sourceDeleted` 也算進去、略過 Reasonix 的合成 session，這兩種這裡都不會產生。
+pub fn archived_session_count(periods: &[&Period]) -> usize {
+    let mut keys = std::collections::HashSet::new();
+    for period in periods {
+        for (key, session) in &period.sessions {
+            if !session.archived {
+                continue;
+            }
+            let id = if session.session_id.is_empty() {
+                key.as_str()
+            } else {
+                session.session_id.as_str()
+            };
+            keys.insert(format!("{}:{id}", session.client));
+        }
+    }
+    keys.len()
+}
+
 fn period_of<'a>(summary: &'a UsageSummary, name: &str) -> &'a Period {
     match name {
         "today" => &summary.today,
@@ -447,6 +468,20 @@ mod tests {
         let stale = summary(&[session("old", 800)]);
         archive.capture(&stale, &at("2026-08-31", 23));
         assert!(!archive.sessions["claude:old"].periods.contains_key("today"));
+    }
+
+    #[test]
+    fn counts_each_archived_session_once_across_periods() {
+        let mut archive = SessionArchive::default();
+        archive.capture(
+            &summary(&[session("a", 10), session("b", 20), session("c", 30)]),
+            &at("2026-09-24", 9),
+        );
+        let mut later = summary(&[session("a", 10)]);
+        archive.apply(&mut later, &at("2026-09-24", 10));
+        let periods = [&later.today, &later.month, &later.all_time];
+        assert_eq!(archived_session_count(&periods), 2, "b and c, not a");
+        assert_eq!(archived_session_count(&[]), 0);
     }
 
     #[test]

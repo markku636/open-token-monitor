@@ -295,6 +295,17 @@ export interface ExportStatus {
   lastError: string | null;
 }
 
+/** 保留已刪除的 session 的狀態（src-tauri/src/gui/commands.rs `SessionArchiveStatus`）。 */
+export interface SessionArchiveStatus {
+  /** 目前由 archive 補回來的 session 數（上游 archivedSessionCount）。 */
+  archivedSessions: number;
+  /** 常駐的 tm-agent 在跑：archive 由它寫，這裡不能清除。 */
+  agentActive: boolean;
+}
+
+/** 清除保留資料的結果（`ArchiveClearOutcome`）；儲存失敗以錯誤回報。 */
+export type ArchiveClearOutcome = "cleared" | "agentActive";
+
 /** 成本的顯示幣別（src-tauri/src/currency.rs `CurrencyView`）。 */
 export interface CurrencyView {
   code: string;
@@ -341,6 +352,8 @@ export interface Diagnostics {
   uptimeMs: number;
   status: AppStatus;
   electronWidgetInstalled: boolean;
+  /** 常駐的 tm-agent 在跑（設定目錄的 agent.pid 指向活著的程序）。 */
+  externalAgentActive: boolean;
 }
 
 export interface AppError {
@@ -546,6 +559,8 @@ export const api = {
   statsGet: () => invoke<LocalStats | null>("stats_get"),
   statusGet: () => invoke<AppStatus>("status_get"),
   usageRescan: () => invoke<void>("usage_rescan"),
+  sessionArchiveStatus: () => invoke<SessionArchiveStatus>("session_archive_status"),
+  sessionArchiveClear: () => invoke<ArchiveClearOutcome>("session_archive_clear"),
   windowShowReady: () => invoke<void>("window_show_ready"),
   windowToggle: () => invoke<void>("window_toggle"),
   windowHide: () => invoke<void>("window_hide"),
@@ -936,6 +951,10 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     }
     case "export_status":
       return { lastAt: now, lastError: null } satisfies ExportStatus;
+    case "session_archive_status":
+      return { archivedSessions: 3, agentActive: false } satisfies SessionArchiveStatus;
+    case "session_archive_clear":
+      return "cleared" satisfies ArchiveClearOutcome;
     case "currency_get": {
       // 截圖用：`?currency=TWD`。
       const code = new URLSearchParams(location.search).get("currency") ?? "USD";

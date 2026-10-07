@@ -171,6 +171,57 @@ pub async fn usage_rescan(state: State<'_, AppState>) -> AppResult<()> {
     Ok(())
 }
 
+/// 設定頁「保留已刪除的 session」底下的狀態（上游 renderer `renderSessionUsageArchiveStatus`）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionArchiveStatus {
+    /// 目前由 archive 補回來的 session 數（上游 `archivedSessionCount`，以最新的本機 record 為準）。
+    pub archived_sessions: usize,
+    /// 常駐的 tm-agent 在跑：archive 由它寫，這裡只讀、也不能清除。
+    pub agent_active: bool,
+}
+
+#[tauri::command]
+pub fn session_archive_status(state: State<'_, AppState>) -> SessionArchiveStatus {
+    let archived_sessions = state.record.read().unwrap().as_deref().map_or(0, |r| {
+        crate::usage::archive::archived_session_count(&[&r.today, &r.month, &r.all_time])
+    });
+    SessionArchiveStatus {
+        archived_sessions,
+        agent_active: super::agent::external_agent_active(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ArchiveClearOutcome {
+    Cleared,
+    /// 常駐的 tm-agent 在跑（上游回 `{ ok: false, error: 'agentActive' }`）。
+    AgentActive,
+}
+
+/// 清除保留的 session 與每日歷史（上游 `sessionUsageArchive:clear`）。常駐的 tm-agent 在跑時拒絕：
+/// archive 是它在寫。清完立刻完整重掃，下一筆 record 就沒有補回來的 session 與日子。
+#[tauri::command]
+pub async fn session_archive_clear(state: State<'_, AppState>) -> AppResult<ArchiveClearOutcome> {
+    if super::agent::external_agent_active() {
+        return Ok(ArchiveClearOutcome::AgentActive);
+    }
+    let dir = crate::store::config_dir();
+    // 持有 runtime 的鎖到清完：同時改設定造成的重啟不會拿到清一半的檔案。
+    let slot = state.runtime.lock().await;
+    let rt = slot.clone();
+    tauri::async_runtime::spawn_blocking(move || match rt {
+        Some(rt) => rt.clear_archives(&dir),
+        None => crate::usage::clear_retained_archives(&dir, None),
+    })
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))??;
+    drop(slot);
+    tracing::info!("retained session and history archives cleared from settings");
+    Ok(ArchiveClearOutcome::Cleared)
+}
+
 #[tauri::command]
 pub fn window_show_ready(app: AppHandle, window: WebviewWindow) {
     // 系統匣模式啟動時不顯示，等使用者按 tray 圖示。
@@ -234,6 +285,8 @@ pub struct Diagnostics {
     pub uptime_ms: u128,
     pub status: AppStatus,
     pub electron_widget_installed: bool,
+    /// 常駐的 tm-agent 在跑（上游診斷快照的 `externalAgentActive`）：archive 由它寫。
+    pub external_agent_active: bool,
 }
 
 fn electron_widget_installed() -> bool {
@@ -266,6 +319,7 @@ pub fn app_diagnostics(state: State<'_, AppState>) -> Diagnostics {
         uptime_ms: state.started_at.elapsed().as_millis(),
         status: state.status.read().unwrap().clone(),
         electron_widget_installed: electron_widget_installed(),
+        external_agent_active: super::agent::external_agent_active(),
     }
 }
 

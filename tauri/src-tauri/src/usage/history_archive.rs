@@ -441,9 +441,60 @@ impl HistoryArchive {
     }
 }
 
+/// 讀、記、寫這一段與清除互斥：清除夾在讀與寫之間時，剛刪掉的日子會被寫回去。程序裡只有一份
+/// daily history archive，所以一把程序內的鎖就夠（跨程序靠 agent.pid 讓出寫入權）。
+static FILE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn file_lock() -> std::sync::MutexGuard<'static, ()> {
+    FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// 上游 `retainDailyHistory`：先記住這次 graph 的每一天（`write()` 為真時存回檔案），再以 archive
+/// 重建 graph。dry run、常駐 tm-agent 在跑時的 GUI 只讀不寫（上游 `dailyHistoryArchiveWriteEnabled`，
+/// 與上游一樣在要寫的當下才問：graph 掃描可能跑上一分鐘）。
+pub fn retain(path: &Path, graph: &Value, today_key: &str, write: impl FnOnce() -> bool) -> Value {
+    let _guard = file_lock();
+    let mut archive = HistoryArchive::load(path);
+    if archive.capture(graph, today_key) && write() {
+        if let Err(e) = archive.save(path) {
+            tracing::warn!(error = %e, "daily history archive write failed");
+        }
+    }
+    archive.to_graph(graph, today_key)
+}
+
+/// 刪掉 archive 檔（上游 `clearDailyHistoryArchive`）。回傳是否真的刪了。
+pub fn clear(path: &Path) -> AppResult<bool> {
+    let _guard = file_lock();
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(AppError::Storage(format!("{}: {e}", path.display()))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clear_forgets_the_deleted_days() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(HISTORY_ARCHIVE_FILE);
+        let today = "2026-09-24";
+        retain(&path, &graph(&[("2026-08-01", 100)]), today, || true);
+        let later = graph(&[(today, 10)]);
+        let kept = retain(&path, &later, today, || true);
+        assert_eq!(kept["contributions"].as_array().unwrap().len(), 2);
+        assert!(clear(&path).unwrap());
+        assert!(!clear(&path).unwrap(), "already gone");
+        let rebuilt = retain(&path, &later, today, || false);
+        assert_eq!(rebuilt["contributions"].as_array().unwrap().len(), 1);
+        assert!(
+            !path.exists(),
+            "a read-only retain does not recreate the file"
+        );
+    }
 
     fn graph(days: &[(&str, i64)]) -> Value {
         json!({ "contributions": days.iter().map(|(d, n)| json!({

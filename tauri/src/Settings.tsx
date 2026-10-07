@@ -8,6 +8,7 @@ import {
   type AppStatus,
   type Diagnostics,
   type LocalStats,
+  type SessionArchiveStatus,
   type SettingsView,
   type SyncReport,
   type ThemeSetting,
@@ -26,6 +27,7 @@ import { ExportSection } from "./SettingsExport";
 import { notesOf, ReleaseNotes } from "./UpdatePill";
 import { formatShortcut, shortcutFromEvent } from "./shortcut";
 import { normalizeOwnerEmail } from "./ownerEmail";
+import { sessionArchiveNote } from "./sessionArchive";
 
 const SOURCE_LABEL: Record<string, string> = {
   baked: t("內建"),
@@ -420,6 +422,91 @@ function CopilotLoginField() {
   );
 }
 
+// 保留已刪除的 session：開關、目前保留幾個、清除保留的資料（上游設定頁的 Session history 群組）。
+// 清除連同每日歷史的 archive 一起清（上游 sessionUsageArchive:clear），常駐的 tm-agent 在跑時不能清。
+function SessionArchiveField({ s }: { s: SettingsView }) {
+  const updateSettings = useApp((x) => x.updateSettings);
+  const updatedAt = useApp((x) => x.local?.updatedAt);
+  const [status, setStatus] = useState<SessionArchiveStatus | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  // 數字跟著本機 record：每次有新的 record（包括清除後的重掃）就重拉。
+  useEffect(() => {
+    let alive = true;
+    api
+      .sessionArchiveStatus()
+      .then((x) => {
+        if (alive) setStatus(x);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [updatedAt, s.sessionUsageArchiveEnabled, reload]);
+  useEffect(() => {
+    if (!message) return;
+    const id = setTimeout(() => setMessage(null), 6_000);
+    return () => clearTimeout(id);
+  }, [message]);
+  const clear = async () => {
+    setBusy(true);
+    try {
+      const outcome = await api.sessionArchiveClear();
+      setMessage(outcome === "agentActive" ? t("請先停止 tm-agent，再清除保留資料") : t("已清除，重新掃描中…"));
+    } catch (e) {
+      setMessage(t("無法清除保留的資料：{e}", { e: errorMessage(e) }));
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+      setReload((n) => n + 1);
+    }
+  };
+  return (
+    <div>
+      <Field
+        label={t("保留已刪除的 session")}
+        hint={t("Claude Code 預設 30 天後刪掉舊紀錄；開啟時那些用量仍算進本月與全部（只存在這台電腦）")}
+      >
+        <Toggle
+          checked={s.sessionUsageArchiveEnabled}
+          onChange={(v) => void updateSettings({ sessionUsageArchiveEnabled: v })}
+        />
+      </Field>
+      <div className="flex items-center justify-between gap-3 pb-2.5">
+        <span className="text-xs text-fg/50">{message ?? sessionArchiveNote(s.sessionUsageArchiveEnabled, status)}</span>
+        {confirming ? (
+          <div className="flex shrink-0 gap-2">
+            <Button variant="danger" disabled={busy} onClick={() => void clear()}>
+              {t("確定清除")}
+            </Button>
+            <Button disabled={busy} onClick={() => setConfirming(false)}>
+              {t("取消")}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            className="shrink-0"
+            disabled={busy || status?.agentActive === true}
+            onClick={() => {
+              setMessage(null);
+              setConfirming(true);
+            }}
+          >
+            {t("清除保留資料")}
+          </Button>
+        )}
+      </div>
+      {confirming && (
+        <p className="pb-2.5 text-xs text-danger">
+          {t("要清除所有保留的 session 用量與每日歷史嗎？此操作無法復原。")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function toolNote(id: string, local: LocalStats | null, appStatus: AppStatus | null): string {
   const base = DETECTED_LABEL[local?.clientStatus[id] ?? ""] ?? "";
   const sync = appStatus?.selfSync?.[id];
@@ -590,15 +677,7 @@ export default function Settings() {
           <Field label={t("即時更新")} hint={watchNote(s, appStatus)}>
             <Toggle checked={s.watchEnabled} onChange={(v) => void updateSettings({ watchEnabled: v })} />
           </Field>
-          <Field
-            label={t("保留已刪除的 session")}
-            hint={t("Claude Code 預設 30 天後刪掉舊紀錄；開啟時那些用量仍算進本月與全部（只存在這台電腦）")}
-          >
-            <Toggle
-              checked={s.sessionUsageArchiveEnabled}
-              onChange={(v) => void updateSettings({ sessionUsageArchiveEnabled: v })}
-            />
-          </Field>
+          <SessionArchiveField s={s} />
           <Field label={t("每日歷史")} hint={historyNote(s, appStatus)}>
             <Toggle checked={s.historyEnabled} onChange={(v) => void updateSettings({ historyEnabled: v })} />
           </Field>

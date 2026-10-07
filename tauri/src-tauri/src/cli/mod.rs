@@ -6,6 +6,8 @@
 //! `TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS`、`TOKEN_MONITOR_ALL_TIME_SINCE`。
 //!
 //! 同一台電腦不要同時跑 GUI 與 `tm-agent run`：兩者用同一個 deviceId，會輪流覆蓋對方的上傳。
+//! `run` 與 `once`（dry run 以外）執行期間在設定目錄留 `agent.pid`（上游同名），GUI 看到就讓出
+//! session 與 daily history archive 的寫入、也不讓人清除它們（device/agent_pid.rs）。
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -17,6 +19,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use tokio_util::sync::CancellationToken;
 
 use crate::collector::{CollectorConfig, ScanSource};
+use crate::device::agent_pid::PidFile;
 use crate::device::events::{CoreEvent, EventSink};
 use crate::device::hub_sender;
 use crate::device::runtime::{DeviceRuntime, RuntimeConfig, WatchConfig};
@@ -645,6 +648,7 @@ async fn cmd_run(
     } else {
         log_event()
     };
+    let pid_file = register_pid_file(dry_run);
     let rt = DeviceRuntime::start(RuntimeConfig {
         envelope: identity::envelope(&ctx.device_id, identity::RUNTIME_AGENT)
             .with_owner_email(&ctx.settings.owner_email),
@@ -657,6 +661,7 @@ async fn cmd_run(
             .session_usage_archive_enabled
             .then(|| crate::store::config_dir().join(crate::usage::archive_store::ARCHIVE_FILE)),
         archive_writes: !dry_run,
+        external_agent: None,
         anchor_file: (!dry_run)
             .then(|| crate::store::config_dir().join(crate::collector::ANCHOR_FILE)),
         upload_interval_ms: ctx.settings.sync_upload_interval_ms,
@@ -670,7 +675,28 @@ async fn cmd_run(
     wait_for_shutdown().await;
     tracing::info!("stopping");
     rt.stop().await;
+    // runtime 停了（archive 不會再寫）才把寫入權還給 GUI。
+    drop(pid_file);
     Ok(())
+}
+
+/// 上游 agent.js `registerPidFile`：dry run 以外的 `run` 與 `once` 在任何掃描之前寫下 PID
+/// （device/agent_pid.rs），開著的 widget 看到就讓出 archive 的寫入。寫不了只記 warning：少了協調，
+/// 收集與上傳照常。
+fn register_pid_file(dry_run: bool) -> Option<PidFile> {
+    if dry_run {
+        return None;
+    }
+    match PidFile::register(&crate::store::config_dir()) {
+        Ok(pid_file) => {
+            tracing::debug!(path = %pid_file.path().display(), "agent pid file written");
+            Some(pid_file)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "could not write the agent pid file; a running widget will keep writing the archives");
+            None
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -690,6 +716,8 @@ async fn cmd_once(
     } else {
         Some(hub_sender(hub_client(&ctx.hub)?))
     };
+    // 結束（含失敗）時 drop 就刪掉。
+    let _pid_file = register_pid_file(dry_run);
     let (record, ingest) = DeviceRuntime::run_once_with_anchor(
         RuntimeConfig {
             envelope: identity::envelope(&ctx.device_id, identity::RUNTIME_AGENT)
@@ -702,6 +730,7 @@ async fn cmd_once(
                 crate::store::config_dir().join(crate::usage::archive_store::ARCHIVE_FILE)
             }),
             archive_writes: !dry_run || write_archives,
+            external_agent: None,
             anchor_file: None,
             upload_interval_ms: ctx.settings.sync_upload_interval_ms,
             sender,

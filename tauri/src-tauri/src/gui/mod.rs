@@ -4,6 +4,7 @@
 //! tray → 套用視窗模式 → 啟動收集 runtime → 前端首次繪製後 `window_show_ready`
 //! （4 秒保險絲：前端掛了也要讓視窗出現，否則使用者只看得到 tray）。
 
+mod agent;
 mod bridge;
 mod bubble;
 mod chrome;
@@ -132,6 +133,8 @@ pub fn run() {
             commands::stats_get,
             commands::status_get,
             commands::usage_rescan,
+            commands::session_archive_status,
+            commands::session_archive_clear,
             commands::window_show_ready,
             commands::window_toggle,
             commands::window_hide,

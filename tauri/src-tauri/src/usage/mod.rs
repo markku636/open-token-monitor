@@ -12,9 +12,32 @@ pub mod keys;
 pub mod projects;
 pub mod session_meta;
 
+use std::path::Path;
+
 use serde_json::Value;
 
+use crate::error::AppResult;
 use crate::wire::Period;
+
+/// 清除保留的 session 與每日歷史（上游 main.js `sessionUsageArchive:clear`：session store 的 `clear()`
+/// 加上 `clearDailyHistoryArchive()`）。`store` 是開著的 session archive（清記憶體與檔案）；沒有開著的
+/// （archive 關閉時）就直接刪 `dir` 裡的檔。保留功能關閉時資料仍在，所以一樣要清。
+pub fn clear_retained_archives(
+    dir: &Path,
+    store: Option<&mut archive_store::ArchiveStore>,
+) -> AppResult<()> {
+    match store {
+        Some(store) => {
+            let removed = store.clear()?;
+            tracing::info!(sessions = removed, "session usage archive cleared");
+        }
+        None => {
+            archive_store::remove_files(&dir.join(archive_store::ARCHIVE_FILE))?;
+        }
+    }
+    history_archive::clear(&dir.join(history_archive::HISTORY_ARCHIVE_FILE))?;
+    Ok(())
+}
 
 /// 一次 tokscale 掃描輸出 → 一個 period：先摺入 session / workspace metadata，
 /// 再抽出用量列，最後（projects 開啟時）由 session 彙總專案。
