@@ -46,7 +46,7 @@ fn emit(app: &AppHandle) {
 pub fn start(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let http = reqwest::Client::builder()
+        let http = crate::outbound::builder()
             .user_agent(format!(
                 "token-monitor-tauri/{}",
                 crate::baked::AGENT_VERSION

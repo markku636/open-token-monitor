@@ -148,13 +148,23 @@ pub async fn check_now(app: &AppHandle) -> UpdateState {
         }
     };
     set_state(app, UpdateState::Checking);
+    // plugin 自己建 client（另一版 reqwest），只收一個固定的 proxy：以 feed 網址的決定為準，
+    // 安裝檔也在 hub 上，同一個決定。直連時明確關掉 plugin 的系統 proxy。
+    let proxy = crate::outbound::decide(url.as_str(), Duration::from_secs(10))
+        .await
+        .fixed_proxy();
     let checked = async {
-        app.updater_builder()
+        let builder = app
+            .updater_builder()
             .endpoints(vec![url])?
-            .timeout(REQUEST_TIMEOUT)
-            .build()?
-            .check()
-            .await
+            .timeout(REQUEST_TIMEOUT);
+        match proxy {
+            Some(proxy) => builder.proxy(proxy),
+            None => builder.no_proxy(),
+        }
+        .build()?
+        .check()
+        .await
     }
     .await;
     match checked {

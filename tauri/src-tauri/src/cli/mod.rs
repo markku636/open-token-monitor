@@ -179,6 +179,14 @@ enum Command {
     },
     /// 環境診斷：tokscale、設定、hub 連線與 secret 來源
     Doctor,
+    /// 印出對外連線的 proxy 決定（proxy 環境變數，或 Windows 的系統 proxy / PAC / WPAD）；不帶網址時查 hub
+    Proxy {
+        /// 要查的網址
+        urls: Vec<String>,
+        /// 印 JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// 管理 client secret 的覆寫值（存在 OS 認證管理員，金鑰輪替用）
     Secret {
         #[command(subcommand)]
@@ -227,6 +235,7 @@ const SUBCOMMANDS: &[&str] = &[
     "limits",
     "company",
     "doctor",
+    "proxy",
     "secret",
     "settings",
     "session-detail",
@@ -1042,6 +1051,15 @@ async fn cmd_doctor(cli: &Cli, ctx: Context) -> AppResult<()> {
         ctx.hub.secret_source
     );
     healthy &= ctx.hub.url.is_some() && ctx.hub.secret.is_some();
+    if let Some(url) = ctx.hub.url.as_deref() {
+        let decision = crate::outbound::decide(url, PROXY_LOOKUP_LIMIT).await;
+        let blocked = decision.route == crate::outbound::Route::Blocked;
+        healthy &= !blocked;
+        println!(
+            "[{}] proxy       {decision}",
+            if blocked { "FAIL" } else { "info" }
+        );
+    }
     let home = dirs::home_dir().unwrap_or_default();
     let tracked = |c: &str| ctx.settings.tracked_clients.iter().any(|x| x == c);
     if tracked("cursor") {
@@ -1113,6 +1131,42 @@ async fn cmd_doctor(cli: &Cli, ctx: Context) -> AppResult<()> {
     }
 }
 
+/// 診斷時等系統 PAC / WPAD 的上限（WPAD 探索在沒有 WPAD 的網路上也要幾秒）。
+const PROXY_LOOKUP_LIMIT: Duration = Duration::from_secs(30);
+
+async fn cmd_proxy(ctx: Context, urls: &[String], json: bool) -> AppResult<()> {
+    let urls: Vec<String> = if urls.is_empty() {
+        ctx.hub.url.clone().into_iter().collect()
+    } else {
+        urls.to_vec()
+    };
+    if urls.is_empty() {
+        return Err(AppError::InvalidArgument(
+            "no URL given and no hub configured".into(),
+        ));
+    }
+    let mut rows = Vec::new();
+    for url in &urls {
+        let decision = crate::outbound::decide(url, PROXY_LOOKUP_LIMIT).await;
+        if json {
+            // proxy 網址的帳密一律遮掉（`proxy_display`）。
+            rows.push(serde_json::json!({
+                "url": url,
+                "route": decision.route_kind(),
+                "proxy": decision.proxy_display(),
+                "source": decision.source,
+                "note": decision.note,
+            }));
+        } else {
+            println!("{url}  {decision}");
+        }
+    }
+    if json {
+        print_json(&rows, true);
+    }
+    Ok(())
+}
+
 fn cmd_secret(action: SecretAction) -> AppResult<()> {
     match action {
         SecretAction::Set { from_env } => {
@@ -1177,6 +1231,7 @@ pub async fn run(cli: Cli) -> ExitCode {
                 follow_secs,
             } => cmd_company(ctx, json, timeout_secs, follow_secs).await,
             Command::Doctor => cmd_doctor(&cli, ctx).await,
+            Command::Proxy { ref urls, json } => cmd_proxy(ctx, urls, json).await,
             Command::Secret { action } => cmd_secret(action),
             Command::Settings => {
                 print_json(&ctx.settings, true);

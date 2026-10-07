@@ -18,6 +18,7 @@ pub mod hub;
 pub mod identity;
 pub mod limits;
 pub mod logging;
+pub mod outbound;
 pub mod ranges;
 pub mod secrets;
 pub mod service_status;

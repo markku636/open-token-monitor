@@ -27,7 +27,7 @@ pub async fn service_status_get(force: bool) -> Vec<ProviderStatus> {
             }
         }
     }
-    let http = reqwest::Client::builder()
+    let http = crate::outbound::builder()
         .user_agent(format!(
             "TokenMonitor/{} (+https://github.com/Javis603/token-monitor)",
             crate::baked::AGENT_VERSION

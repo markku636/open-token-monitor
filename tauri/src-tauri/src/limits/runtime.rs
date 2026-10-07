@@ -124,7 +124,7 @@ pub fn backoff(attempt: u32, seed: u128) -> Duration {
 
 impl LimitsRuntime {
     pub fn new(config: LimitsConfig) -> LimitsRuntime {
-        let http = reqwest::Client::builder()
+        let http = crate::outbound::builder()
             .user_agent(format!(
                 "token-monitor-tauri/{}",
                 crate::baked::AGENT_VERSION

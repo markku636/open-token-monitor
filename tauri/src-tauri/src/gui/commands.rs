@@ -234,6 +234,8 @@ pub struct Diagnostics {
     pub uptime_ms: u128,
     pub status: AppStatus,
     pub electron_widget_installed: bool,
+    /// 連 hub 時的 proxy 決定（`outbound::decide`；帳密已遮掉）；沒有 hub 時為 `None`。
+    pub proxy: Option<String>,
 }
 
 fn electron_widget_installed() -> bool {
@@ -248,11 +250,21 @@ fn electron_widget_installed() -> bool {
 }
 
 #[tauri::command]
-pub fn app_diagnostics(state: State<'_, AppState>) -> Diagnostics {
+pub async fn app_diagnostics(state: State<'_, AppState>) -> AppResult<Diagnostics> {
     let settings = state.settings();
+    let hub = crate::settings::resolve_hub(&settings, None, None);
+    let proxy = match hub.url.as_deref() {
+        // 系統 PAC / WPAD 還沒查過時最多等 5 秒，診斷畫面不會一直空著。
+        Some(url) => Some(
+            crate::outbound::decide(url, std::time::Duration::from_secs(5))
+                .await
+                .to_string(),
+        ),
+        None => None,
+    };
     let (os_name, os_version) = crate::identity::os_info();
     let tokscale = state.tokscale.read().unwrap().clone();
-    Diagnostics {
+    Ok(Diagnostics {
         app_version: crate::baked::AGENT_VERSION,
         build_channel: crate::baked::BUILD_CHANNEL,
         device_id: settings.device_id,
@@ -266,7 +278,8 @@ pub fn app_diagnostics(state: State<'_, AppState>) -> Diagnostics {
         uptime_ms: state.started_at.elapsed().as_millis(),
         status: state.status.read().unwrap().clone(),
         electron_widget_installed: electron_widget_installed(),
-    }
+        proxy,
+    })
 }
 
 pub(super) fn open_log_dir(app: &AppHandle) {
@@ -342,7 +355,9 @@ pub async fn cursor_set_token(state: State<'_, AppState>, token: String) -> AppR
 pub async fn copilot_login_start(app: AppHandle) -> AppResult<crate::limits::copilot::DeviceCode> {
     use crate::limits::copilot::{device_poll, device_start, PollResult};
     use tauri::Emitter;
-    let http = reqwest::Client::new();
+    let http = crate::outbound::builder()
+        .build()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     let code = device_start(&http).await.map_err(AppError::Internal)?;
     let _ = app.opener().open_url(&code.verification_uri, None::<&str>);
     let device_code = code.device_code.clone();

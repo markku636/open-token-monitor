@@ -82,9 +82,10 @@ notify = "8"
 keyring = { version = "3", features = ["windows-native"] }
 # osName / osVersion：讀 HKLM\...\Windows NT\CurrentVersion（對齊上游 src/shared/osVersion.js）。
 winreg = "0.55"
-# 工作列上方重新置頂（gui/taskbar.rs）與圓角（gui/chrome.rs）：SetWindowPos、前景事件 hook、
-# DwmSetWindowAttribute。與 tao / tauri 同一個版本與 feature 集合，沒有多編譯任何東西。
-windows = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
+# 核心：系統 proxy（outbound/winhttp.rs）以 WinHTTP 讀 IE 設定並解 PAC / WPAD，tm-agent 也要，
+# 所以不掛在 gui 後面。GUI 另外打開的 feature（SetWindowPos、前景事件 hook、DwmSetWindowAttribute，
+# gui/taskbar.rs、gui/chrome.rs）列在下面的 `gui` feature；與 tao / tauri 同一個版本。
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinHttp"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
@@ -105,7 +106,9 @@ gui = [
   "dep:tauri-plugin-window-state",
   "dep:tauri-plugin-autostart",
   "dep:tauri-plugin-opener",
-  "dep:windows",
+  "windows/Win32_Graphics_Dwm",
+  "windows/Win32_UI_Accessibility",
+  "windows/Win32_UI_WindowsAndMessaging",
   "dep:tauri-plugin-global-shortcut",
   "dep:tauri-plugin-dialog",
   "dep:tauri-plugin-updater",

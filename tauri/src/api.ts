@@ -341,6 +341,8 @@ export interface Diagnostics {
   uptimeMs: number;
   status: AppStatus;
   electronWidgetInstalled: boolean;
+  /** 連 hub 時的 proxy 決定（例如 `direct (system PAC/WPAD)`）；沒有 hub 時為 null。 */
+  proxy: string | null;
 }
 
 export interface AppError {

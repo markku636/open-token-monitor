@@ -198,7 +198,7 @@ impl HubClient {
         if !matches!(parsed.scheme(), "http" | "https") {
             return Err(HubError::InvalidUrl(base));
         }
-        let http = reqwest::Client::builder()
+        let http = crate::outbound::builder()
             .user_agent(format!(
                 "token-monitor-tauri/{}",
                 crate::baked::AGENT_VERSION

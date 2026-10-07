@@ -371,7 +371,7 @@ pub fn spawn(client: HubClient, sink: StreamSink, cancel: CancellationToken) -> 
     tokio::spawn(async move {
         // 串流不能有整體逾時（連線本來就不會結束）；閒置逾時在 read_stream 裡。
         // no_gzip：gzip 由 BodyDecoder 自己解（見檔頭）。
-        let http = match reqwest::Client::builder()
+        let http = match crate::outbound::builder()
             .user_agent(format!(
                 "token-monitor-tauri/{}",
                 crate::baked::AGENT_VERSION
