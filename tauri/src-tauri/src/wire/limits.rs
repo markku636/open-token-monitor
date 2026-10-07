@@ -65,6 +65,10 @@ pub struct LimitWindow {
     pub kind: WindowKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metric: Option<String>,
+    /// 這個窗口的來源：`web`（伺服器的數字）或 `local`（本機估算）。目前只有 OpenCode 帶
+    /// （上游 `VALID_LIMIT_WINDOW_SOURCES`）；hub 合併同一帳號時 web 優先於 local。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit_id: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -100,6 +104,7 @@ impl LimitWindow {
         LimitWindow {
             kind,
             metric: None,
+            source: None,
             limit_id: None,
             additional: false,
             label: String::new(),
@@ -124,6 +129,13 @@ pub struct LimitProvider {
     pub provider: String,
     #[serde(default)]
     pub account_key: String,
+    /// OpenCode：cookie 解出的 workspace 身分（上游只在 opencode 帶）。hub 以它挑合併後帳號的正式身分。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_account_key: Option<String>,
+    /// OpenCode：同一帳號的其他身分（API key、Go／Zen workspace）。hub 靠它把只有 key 的裝置與
+    /// 有 cookie 的裝置併成一個帳號；排序、去重、最多 8 個（上游 `normalizeOpenCodeAccountKeyAliases`）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub account_key_aliases: Vec<String>,
     #[serde(default)]
     pub account_label: String,
     #[serde(default)]
@@ -158,6 +170,8 @@ impl LimitProvider {
         LimitProvider {
             provider: provider.to_string(),
             account_key: String::new(),
+            web_account_key: None,
+            account_key_aliases: Vec::new(),
             account_label: String::new(),
             plan_label: String::new(),
             account_name: String::new(),

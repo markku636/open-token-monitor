@@ -1,0 +1,8 @@
+{
+  "mode": "single",
+  "ambientKey": "sk-replay-nogo",
+  "localRows": [{ "createdMs": 1767222000000, "cost": 1.8 }],
+  "responses": {
+    "goApi": { "status": 403, "json": { "error": { "type": "EntitlementError", "message": "No active subscription" } } }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "mode": "profile",
+  "name": "ci",
+  "apiKey": "sk-replay-expired",
+  "responses": {
+    "goApi": { "status": 401 }
+  }
+}

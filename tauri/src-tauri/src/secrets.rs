@@ -1,5 +1,5 @@
 //! OS 認證管理員裡的秘密：client secret 的覆寫值（金鑰輪替）與額度 provider 的登入
-//! （GitHub Copilot 的 OAuth token）。
+//! （GitHub Copilot 的 OAuth token、OpenCode 的 API key 與 opencode.ai cookie）。
 //!
 //! 正常情況 secret 內建在 binary；只有 hub 換了 secret、員工還沒裝新版時，才由設定頁或
 //! `tm-agent secret set` 寫一份覆寫值到 OS 認證管理員（Windows Credential Manager）。
@@ -11,6 +11,10 @@ use crate::error::{AppError, AppResult};
 const ACCOUNT: &str = "hub-client-secret";
 /// GitHub Copilot 額度用的 GitHub OAuth token（設定頁以 device flow 登入取得）。
 pub const COPILOT_TOKEN: &str = "copilot-github-token";
+/// OpenCode Go 的 API key（設定頁貼上；上游存在 `opencodeProfiles.<name>.apiKey`）。
+pub const OPENCODE_API_KEY: &str = "opencode-api-key";
+/// opencode.ai 的登入 cookie（設定頁貼上，已整理成 cookie header；上游 `opencodeProfiles.<name>.cookie`）。
+pub const OPENCODE_COOKIE: &str = "opencode-cookie";
 
 fn entry() -> AppResult<keyring::Entry> {
     named(ACCOUNT)

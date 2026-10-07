@@ -447,6 +447,78 @@ test("limits: GitHub Copilot usage maps exactly like upstream", { skip }, () => 
   }
 });
 
+// OpenCode：每個 opencode-*.json 是一個情境（檔名排序，與 tm-agent 的輸出順序相同）。同一份 HTTP 回應以
+// 假 fetch 餵給上游的 fetchOpenCodeLimits（單帳號）或 fetchOpenCodeProfile（多帳號時的一列），整列逐欄比對。
+// 路由規則與 src-tauri/src/limits/opencode/transport.rs 的 `route_of` 相同。
+test("limits: OpenCode Go and Zen map exactly like upstream", { skip }, async () => {
+  const bin = agentBin();
+  const dir = path.join(root, "src-tauri", "tests", "fixtures", "limits");
+  const res = spawnSync(bin, ["limits", "--replay", dir], { encoding: "utf8" });
+  assert.equal(res.status, 0, res.stderr);
+  const ours = JSON.parse(res.stdout).providers.filter((p) => p.provider === "opencode");
+  const files = fs.readdirSync(dir).filter((n) => n.startsWith("opencode-") && n.endsWith(".json")).sort();
+  assert.ok(files.length > 0, "OpenCode fixtures exist");
+  assert.equal(ours.length, files.length, "one row per scenario");
+
+  const core = up("limits/core.js");
+  const oc = up("providers/opencode/limits.js");
+  const web = up("providers/opencode/web.js");
+  const goApi = up("providers/opencode/goApi.js");
+  const goLimits = up("providers/opencode/goLimits.js");
+  const AT = "2026-01-01T00:00:00.000Z";
+  const atMs = Date.parse(AT);
+
+  for (const [i, file] of files.entries()) {
+    const fx = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
+    const env = fx.env || {};
+    const fakeFetch = async (url, init = {}) => {
+      const headers = init.headers || {};
+      const method = String(init.method || "GET").toUpperCase();
+      let route = `${method} ${url}`;
+      if (url === goApi.GO_USAGE_URL) route = "goApi";
+      else if (headers["X-Server-Id"] === web.WORKSPACES_SERVER_ID) route = `workspaces:${method}`;
+      else if (headers["X-Server-Id"] === web.SUBSCRIPTION_SERVER_ID) route = `subscription:${method}`;
+      else if (url.endsWith("/go")) route = "goPage";
+      const r = fx.responses?.[route];
+      if (r?.throw) throw new Error("fixture network error");
+      let text = "";
+      if (typeof r?.text === "string") text = r.text;
+      else if (r?.json !== undefined) text = JSON.stringify(r.json);
+      return { status: r ? (r.status ?? 200) : 404, text: async () => text, json: async () => JSON.parse(text) };
+    };
+    let theirs;
+    if (fx.mode === "profile") {
+      theirs = await oc.fetchOpenCodeProfile(
+        fx.name,
+        fx.cookie || undefined,
+        (cookie, d) => web.fetchGoWeb(cookie, d),
+        (cookie, d) => web.fetchZen(cookie, d),
+        atMs,
+        AT,
+        { apiKey: fx.apiKey || undefined, collectGoApi: (d) => goApi.collectGoApi(d), deps: { fetch: fakeFetch, env } },
+      );
+    } else {
+      const stored = fx.apiKey || fx.cookie ? { default: { apiKey: fx.apiKey || undefined, cookie: fx.cookie || undefined, enabled: true } } : {};
+      theirs = await oc.fetchOpenCodeLimits(
+        { opencodeProfiles: stored, opencodeLocalLimitsEnabled: Boolean(fx.localRows), opencodeAmbientEnabled: fx.ambientEnabled !== false },
+        {
+          now: () => atMs,
+          env,
+          fetch: fakeFetch,
+          opencodeReadGoApiKey: () => fx.ambientKey || "",
+          opencodeCollectGo: () =>
+            fx.localRows
+              ? { status: "ok", identity: "opencode-go:replay.db", windows: goLimits.buildWindows(fx.localRows, atMs, goLimits.goLimits(env)) }
+              : { status: "notConfigured", windows: [] },
+        },
+      );
+    }
+    assert.ok(!Array.isArray(theirs), `${file}: the scenario resolves to one account`);
+    assertSame(ours[i], plain(core.normalizeLimitProvider(theirs)), `opencode ${file}`);
+    assertSame(ours[i], plain(core.normalizeLimitProvider(ours[i])), `opencode ${file} is a fixed point of upstream normalization`);
+  }
+});
+
 test("limits: Claude and Codex usage map exactly like upstream", { skip }, () => {
   const bin = agentBin();
   const dir = path.join(root, "src-tauri", "tests", "fixtures", "limits");

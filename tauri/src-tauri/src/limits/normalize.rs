@@ -181,6 +181,10 @@ pub fn account_email(s: &str) -> String {
 /// 把 provider 產出的原始窗口收斂成上游 `normalizeLimitWindow` 的結果。
 pub fn finish_window(mut w: LimitWindow) -> LimitWindow {
     w.label = window_label(&w.label);
+    w.source = w
+        .source
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| matches!(s.as_str(), "web" | "local"));
     w.limit_id = w.limit_id.as_deref().and_then(limit_id);
     w.currency = w.currency.as_deref().and_then(currency);
     w.used_percent = match w.used_percent {
@@ -234,7 +238,30 @@ pub fn sort_windows(windows: &mut [LimitWindow], provider: &str) {
     }
 }
 
+/// 上游 `normalizeOpenCodeAccountKeyAliases`：去空白、去掉與 accountKey 相同的、超過 128 字的，
+/// 去重後排序，最多 8 個。
+pub fn account_key_aliases(values: &[String], account_key: &str) -> Vec<String> {
+    let canonical = account_key.trim();
+    let mut out: Vec<String> = values
+        .iter()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty() && v != canonical && v.encode_utf16().count() <= 128)
+        .collect();
+    out.sort();
+    out.dedup();
+    out.truncate(8);
+    out
+}
+
 pub fn finish_provider(mut p: LimitProvider) -> LimitProvider {
+    // webAccountKey 與 accountKeyAliases 是 OpenCode 專屬的欄位（上游只在 provider 是 opencode 時保留）。
+    if p.provider == "opencode" {
+        p.web_account_key = p.web_account_key.filter(|k| !k.is_empty());
+        p.account_key_aliases = account_key_aliases(&p.account_key_aliases, &p.account_key);
+    } else {
+        p.web_account_key = None;
+        p.account_key_aliases.clear();
+    }
     p.account_label = account_label(&p.account_label);
     p.plan_label = account_label(&p.plan_label);
     p.account_name = account_name(&p.account_name);

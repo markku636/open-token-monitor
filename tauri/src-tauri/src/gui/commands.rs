@@ -32,6 +32,8 @@ const RUNTIME_FIELDS: &[&str] = &[
     "limitsEnabled",
     "limitProviders",
     "limitsRefreshMs",
+    "opencodeAmbientEnabled",
+    "opencodeLocalLimitsEnabled",
 ];
 
 fn save(state: &AppState, next: Settings) -> AppResult<()> {
@@ -399,6 +401,72 @@ pub async fn copilot_logout(state: State<'_, AppState>) -> AppResult<()> {
 #[tauri::command]
 pub fn copilot_signed_in() -> bool {
     crate::limits::copilot::token().is_some()
+}
+
+/// OpenCode 的憑證狀態：存了哪些、有沒有偵測到 OpenCode 自己的 key、額度正在讀哪一個。只有布林值，
+/// 憑證內容永遠不離開 Rust。要讀認證管理員與 auth.json，所以不在主執行緒跑。
+#[tauri::command]
+pub async fn opencode_status(
+    state: State<'_, AppState>,
+) -> AppResult<crate::limits::opencode::CredentialStatus> {
+    let opts = crate::limits::opencode::OpencodeOptions::from_settings(&state.settings());
+    Ok(crate::limits::opencode::credential_status(&opts))
+}
+
+fn opencode_account(kind: &str) -> AppResult<&'static str> {
+    match kind {
+        "api" => Ok(crate::secrets::OPENCODE_API_KEY),
+        "cookie" => Ok(crate::secrets::OPENCODE_COOKIE),
+        _ => Err(AppError::InvalidArgument(format!(
+            "unknown OpenCode credential kind: {kind}"
+        ))),
+    }
+}
+
+/// 貼上 OpenCode 的 API key（`kind = "api"`）或 opencode.ai 的 cookie（`kind = "cookie"`），先探測再存進
+/// OS 認證管理員（上游 `opencode:saveProfile`：key 被拒絕、沒有 Go 方案、連不上都不存；cookie 只有在
+/// Go 與 Zen 都說未登入時才不存）。回傳檢查結果，不回傳憑證。
+#[tauri::command]
+pub async fn opencode_save_credential(
+    state: State<'_, AppState>,
+    kind: String,
+    value: String,
+) -> AppResult<crate::limits::opencode::SaveCheck> {
+    use crate::limits::opencode::{self as oc, SaveCheck};
+    let account = opencode_account(&kind)?;
+    let http = reqwest::Client::new();
+    let t = oc::transport::ReqwestTransport {
+        http: &http,
+        timeout: oc::REQUEST_TIMEOUT,
+    };
+    let (check, stored) = if kind == "api" {
+        let key = value.trim().to_string();
+        (oc::check_api_key(&t, &key).await, key)
+    } else {
+        let cookie = oc::web::sanitize_cookie_header(&value);
+        let env = oc::OpencodeEnv::from_process();
+        (oc::check_cookie(&t, &cookie, &env).await, cookie)
+    };
+    if check != SaveCheck::Saved {
+        return Ok(check);
+    }
+    crate::secrets::set(account, &stored)?;
+    tracing::info!(kind = %kind, "opencode credential saved from settings");
+    if let Some(rt) = state.runtime.lock().await.as_ref() {
+        rt.request_limits_refresh();
+    }
+    Ok(check)
+}
+
+/// 刪掉設定頁存的 OpenCode API key 或 cookie。
+#[tauri::command]
+pub async fn opencode_clear_credential(state: State<'_, AppState>, kind: String) -> AppResult<()> {
+    crate::secrets::clear(opencode_account(&kind)?)?;
+    tracing::info!(kind = %kind, "opencode credential removed from settings");
+    if let Some(rt) = state.runtime.lock().await.as_ref() {
+        rt.request_limits_refresh();
+    }
+    Ok(())
 }
 
 #[tauri::command]

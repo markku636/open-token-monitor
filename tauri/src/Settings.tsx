@@ -23,9 +23,13 @@ import { updateStatusText } from "./update";
 import { providerName } from "./limits";
 import { DisplaySection } from "./SettingsDisplay";
 import { ExportSection } from "./SettingsExport";
+import { OpencodeFields } from "./SettingsOpencode";
 import { notesOf, ReleaseNotes } from "./UpdatePill";
 import { formatShortcut, shortcutFromEvent } from "./shortcut";
 import { normalizeOwnerEmail } from "./ownerEmail";
+
+/** 額度 provider 的勾選順序（與 src-tauri/src/settings.rs SUPPORTED_LIMIT_PROVIDERS、上游目錄相同）。 */
+const LIMIT_PROVIDER_IDS = ["claude", "codex", "opencode", "cursor", "copilot"];
 
 const SOURCE_LABEL: Record<string, string> = {
   baked: t("內建"),
@@ -643,7 +647,7 @@ export default function Settings() {
         </Section>
 
         <Section title={t("額度")}>
-          <Field label={t("顯示並上傳額度")} hint={t("讀取這台電腦上 Claude Code、Codex、Cursor 與 GitHub Copilot 的登入，查詢用量上限；不會上傳任何 token")}>
+          <Field label={t("顯示並上傳額度")} hint={t("讀取這台電腦上 Claude Code、Codex、OpenCode、Cursor 與 GitHub Copilot 的登入，查詢用量上限；不會上傳任何 token")}>
             <Toggle checked={s.limitsEnabled} onChange={(v) => void updateSettings({ limitsEnabled: v })} />
           </Field>
           {s.limitsEnabled && (
@@ -661,10 +665,11 @@ export default function Settings() {
                   onChange={(v) => void updateSettings({ limitsRefreshMs: v })}
                 />
               </Field>
+              {s.limitProviders.includes("opencode") && <OpencodeFields s={s} />}
               {s.limitProviders.includes("cursor") && <CursorTokenField />}
               {s.limitProviders.includes("copilot") && <CopilotLoginField />}
-              <div className="flex gap-4 py-2.5 text-xs">
-                {(["claude", "codex", "cursor", "copilot"] as const).map((id) => (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 py-2.5 text-xs">
+                {LIMIT_PROVIDER_IDS.map((id) => (
                   <label key={id} className="flex items-center gap-1.5">
                     <input
                       type="checkbox"
@@ -673,7 +678,7 @@ export default function Settings() {
                         const next = e.target.checked
                           ? [...s.limitProviders, id]
                           : s.limitProviders.filter((p) => p !== id);
-                        void updateSettings({ limitProviders: ["claude", "codex", "cursor", "copilot"].filter((p) => next.includes(p)) });
+                        void updateSettings({ limitProviders: LIMIT_PROVIDER_IDS.filter((p) => next.includes(p)) });
                       }}
                     />
                     <span>{providerName(id)}</span>

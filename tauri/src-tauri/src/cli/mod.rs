@@ -91,6 +91,24 @@ pub struct Cli {
     /// 額度探測間隔（毫秒；60000 / 120000 / 300000 / 900000 / 1800000）
     #[arg(long, global = true, env = "TOKEN_MONITOR_LIMITS_REFRESH_MS")]
     limits_refresh_ms: Option<u64>,
+    /// 回報 OpenCode 自己存的 Go key 的額度；`0` / `false` / `no` / `off` 關閉（預設開，與上游 agent 相同）
+    #[arg(
+        long,
+        global = true,
+        env = "TOKEN_MONITOR_OPENCODE_AMBIENT",
+        num_args = 0..=1,
+        default_missing_value = "true"
+    )]
+    opencode_ambient: Option<String>,
+    /// 沒有線上數字時以 OpenCode 的本機資料庫估算 Go 額度（預設關，與上游 agent 相同）
+    #[arg(
+        long,
+        global = true,
+        env = "TOKEN_MONITOR_OPENCODE_LOCAL_LIMITS",
+        num_args = 0..=1,
+        default_missing_value = "true"
+    )]
+    opencode_local_limits: Option<String>,
     /// 專案（資料夾）統計；`0` / `false` / `no` / `off` 關閉（與上游 agent 相同）
     #[arg(long, global = true, env = "TOKEN_MONITOR_PROJECTS_ENABLED")]
     projects: Option<String>,
@@ -161,7 +179,7 @@ enum Command {
         /// 印 JSON（LimitsSummary）
         #[arg(long)]
         json: bool,
-        /// 相容測試用：不連網，以目錄裡的 claude-usage.json / codex-usage.json 跑對應，印 JSON
+        /// 相容測試用：不連網，以目錄裡的 claude-usage.json / codex-usage.json / opencode-*.json 等跑對應，印 JSON
         #[arg(long, hide = true)]
         replay: Option<PathBuf>,
     },
@@ -248,6 +266,10 @@ const LEGACY_FLAGS: &[(&str, &str)] = &[
     ("--limitProviders", "--limit-providers"),
     ("--limitsEnabled", "--limits"),
     ("--limitsRefreshMs", "--limits-refresh-ms"),
+    ("--opencodeAmbient", "--opencode-ambient"),
+    ("--opencodeAmbientEnabled", "--opencode-ambient"),
+    ("--opencodeLocalLimits", "--opencode-local-limits"),
+    ("--opencodeLocalLimitsEnabled", "--opencode-local-limits"),
     ("--historyEnabled", "--history"),
     ("--historyIntervalMs", "--history-interval-ms"),
     ("--projectsEnabled", "--projects"),
@@ -418,6 +440,12 @@ fn load_context(cli: &Cli) -> AppResult<Context> {
     if let Some(ms) = cli.limits_refresh_ms {
         settings.limits_refresh_ms = ms;
     }
+    if let Some(v) = &cli.opencode_ambient {
+        settings.opencode_ambient_enabled = parse_bool(v, true);
+    }
+    if let Some(v) = &cli.opencode_local_limits {
+        settings.opencode_local_limits_enabled = parse_bool(v, false);
+    }
     if let Some(email) = &cli.owner_email {
         settings.owner_email = email.clone();
     }
@@ -452,11 +480,19 @@ fn scan_source(cli: &Cli, settings: &Settings) -> AppResult<ScanSource> {
     ))))
 }
 
+/// tm-agent 的額度設定：OpenCode 的 `TOKEN_MONITOR_OPENCODE_COOKIE` 照上游 agent 當成舊版的單一 cookie。
+fn agent_limits_config(settings: &Settings) -> Option<LimitsConfig> {
+    LimitsConfig::from_settings(settings).map(|mut c| {
+        c.opencode.headless = true;
+        c
+    })
+}
+
 /// 固定 JSON 來源是測試：不碰真的 Claude / Codex 憑證與網路。
 fn limits_config(settings: &Settings, source: &ScanSource) -> Option<LimitsConfig> {
     match source {
         ScanSource::Fixtures(_) => None,
-        ScanSource::Tokscale(_) => LimitsConfig::from_settings(settings),
+        ScanSource::Tokscale(_) => agent_limits_config(settings),
     }
 }
 
@@ -758,7 +794,9 @@ async fn cmd_once(
 }
 
 /// 相容測試：把固定的 API 回應交給與正式探測相同的對應函式，身分欄位留空、時間固定。
-fn cmd_limits_replay(dir: &std::path::Path) -> AppResult<()> {
+/// OpenCode 的每個 `opencode-*.json`（檔名排序）是一個情境，各印一列，走的是正式探測的同一條路徑
+/// （只把網路換成情境裡的回應）。
+async fn cmd_limits_replay(dir: &std::path::Path) -> AppResult<()> {
     use crate::limits::normalize::finish_provider;
     use crate::wire::{LimitProvider, LimitsSummary, ProviderStatus};
     const AT: &str = "2026-01-01T00:00:00.000Z";
@@ -799,6 +837,21 @@ fn cmd_limits_replay(dir: &std::path::Path) -> AppResult<()> {
     if let Some(u) = read("cursor-usage.json")? {
         providers.push(crate::limits::cursor::replay(&u, AT.into()));
     }
+    let mut opencode: Vec<String> = std::fs::read_dir(dir)
+        .map_err(|e| AppError::Storage(e.to_string()))?
+        .flatten()
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|n| n.starts_with("opencode-") && n.ends_with(".json"))
+        .collect();
+    opencode.sort();
+    let at_ms = chrono::DateTime::parse_from_rfc3339(AT)
+        .map(|d| d.timestamp_millis())
+        .unwrap_or_default();
+    for name in opencode {
+        if let Some(u) = read(&name)? {
+            providers.push(crate::limits::opencode::replay(&u, at_ms).await);
+        }
+    }
     print_json(
         &LimitsSummary {
             updated_at: Some(AT.into()),
@@ -811,12 +864,16 @@ fn cmd_limits_replay(dir: &std::path::Path) -> AppResult<()> {
 }
 
 async fn cmd_limits(ctx: Context, json: bool) -> AppResult<()> {
-    let config = LimitsConfig::from_settings(&ctx.settings).unwrap_or(LimitsConfig {
+    let config = agent_limits_config(&ctx.settings).unwrap_or(LimitsConfig {
         providers: crate::settings::SUPPORTED_LIMIT_PROVIDERS
             .iter()
             .map(|s| s.to_string())
             .collect(),
         refresh_ms: ctx.settings.limits_refresh_ms,
+        opencode: crate::limits::opencode::OpencodeOptions {
+            headless: true,
+            ..crate::limits::opencode::OpencodeOptions::from_settings(&ctx.settings)
+        },
     });
     let (summary, _) = LimitsRuntime::new(config).probe_all().await;
     if json {
@@ -1168,7 +1225,7 @@ pub async fn run(cli: Cli) -> ExitCode {
             Command::Scan { ref period, raw } => cmd_scan(&cli, ctx, period.clone(), raw).await,
             Command::Health => cmd_health(ctx).await,
             Command::Limits { json, ref replay } => match replay {
-                Some(dir) => cmd_limits_replay(dir),
+                Some(dir) => cmd_limits_replay(dir).await,
                 None => cmd_limits(ctx, json).await,
             },
             Command::Company {
@@ -1249,5 +1306,28 @@ mod tests {
         assert_eq!(args(&["tm-agent"]), ["tm-agent", "run"]);
         assert_eq!(args(&["tm-agent", "doctor"]), ["tm-agent", "doctor"]);
         assert_eq!(args(&["tm-agent", "--help"]), ["tm-agent", "--help"]);
+    }
+
+    #[test]
+    fn opencode_flags_accept_the_upstream_spellings() {
+        let parse = |list: &[&str]| Cli::try_parse_from(args(list)).unwrap();
+        // 上游 parseArgs：沒帶值的旗標是 true，下一個不是 `--` 開頭的參數是值。
+        let cli = parse(&[
+            "tm-agent",
+            "--once",
+            "--opencode-local-limits",
+            "--opencodeAmbient=0",
+        ]);
+        assert_eq!(cli.opencode_local_limits.as_deref(), Some("true"));
+        assert_eq!(cli.opencode_ambient.as_deref(), Some("0"));
+        let cli = parse(&[
+            "tm-agent",
+            "--opencodeLocalLimitsEnabled",
+            "off",
+            "--opencodeAmbientEnabled",
+        ]);
+        assert_eq!(cli.opencode_local_limits.as_deref(), Some("off"));
+        assert_eq!(cli.opencode_ambient.as_deref(), Some("true"));
+        assert!(!parse_bool("off", false) && parse_bool("true", false));
     }
 }

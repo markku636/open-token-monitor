@@ -1,0 +1,14 @@
+{
+  "mode": "single",
+  "cookie": "Cookie: auth=replay-b; theme=dark",
+  "responses": {
+    "workspaces:GET": { "status": 200, "text": "$R[0]=[]" },
+    "workspaces:POST": { "status": 200, "json": { "result": [{ "workspace": "wrk_02POST" }] } },
+    "goPage": { "status": 200, "text": "<html>rollingUsage:{usagePercent:5}</html>" },
+    "subscription:GET": { "status": 200, "text": "$R[0]={}" },
+    "subscription:POST": {
+      "status": 200,
+      "text": "$R[0]={rollingUsage:{status:\"ok\",usagePercent:61.26,resetInSec:7200},weeklyUsage:{usagePercent:18.04,resetInSec:432000},currentBalance:\"$7.10\"}"
+    }
+  }
+}

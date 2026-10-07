@@ -1,0 +1,21 @@
+{
+  "mode": "profile",
+  "name": "work",
+  "apiKey": "sk-replay-work",
+  "cookie": "auth=replay-work",
+  "responses": {
+    "goApi": { "status": 401, "text": "" },
+    "workspaces:GET": { "status": 200, "text": "{id:\"wrk_03WORK\"}" },
+    "goPage": {
+      "status": 200,
+      "json": {
+        "go": {
+          "rolling": { "usagePercent": 20, "resetInSec": 600 },
+          "weekly": { "usagePercent": 50, "resetAt": 1767400000 },
+          "monthly": { "usage": 0.5 }
+        }
+      }
+    },
+    "subscription:GET": { "status": 200, "text": "null" }
+  }
+}

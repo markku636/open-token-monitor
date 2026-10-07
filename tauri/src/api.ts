@@ -38,6 +38,10 @@ export interface Settings {
   limitsEnabled: boolean;
   limitProviders: string[];
   limitsRefreshMs: number;
+  /** 追蹤 OpenCode 自己存在 auth.json 的 Go key（預設開）。 */
+  opencodeAmbientEnabled: boolean;
+  /** 沒有線上數字時以 OpenCode 的本機資料庫估算 Go 額度（預設關）。 */
+  opencodeLocalLimitsEnabled: boolean;
   language: "auto" | "zh-TW" | "en";
   theme: ThemeSetting;
   automaticAppUpdates: boolean;
@@ -94,6 +98,8 @@ export type SettingsPatch = Partial<
     | "limitsEnabled"
     | "limitProviders"
     | "limitsRefreshMs"
+    | "opencodeAmbientEnabled"
+    | "opencodeLocalLimitsEnabled"
     | "windowMode"
     | "keepAboveTaskbar"
     | "floatingBubbleEnabled"
@@ -208,7 +214,10 @@ export type ProviderStatus =
 
 export interface LimitWindow {
   kind: "session" | "daily" | "weekly" | "billing";
+  /** `credits`：主要數字是錢（預付餘額，`remaining`）；`spend`：已花的錢（`used`）。 */
   metric?: string;
+  /** `web`（伺服器的數字）或 `local`（本機估算）；目前只有 OpenCode 帶。 */
+  source?: string;
   limitId?: string;
   additional?: boolean;
   label: string;
@@ -219,19 +228,31 @@ export interface LimitWindow {
   remainingPercent: number | null;
   resetsAt: string | null;
   windowMinutes: number | null;
+  detail?: string;
   currency: string | null;
   showMeter: boolean;
+}
+
+/** provider 層的預付餘額（舊裝置只送這個，沒有 credits 窗口）。 */
+export interface LimitBalance {
+  amount?: number | null;
+  currency?: string;
+  monthSpend?: number | null;
 }
 
 export interface LimitProvider {
   provider: string;
   accountKey: string;
   accountLabel: string;
+  planLabel?: string;
+  accountName?: string;
   accountEmail: string;
   status: ProviderStatus;
   source: string;
   updatedAt: string | null;
   windows: LimitWindow[];
+  balanceUsd?: number | null;
+  balance?: LimitBalance | null;
 }
 
 export interface LimitsView {
@@ -569,6 +590,11 @@ export const api = {
   copilotLoginStart: () => invoke<CopilotDeviceCode>("copilot_login_start"),
   copilotLogout: () => invoke<void>("copilot_logout"),
   copilotSignedIn: () => invoke<boolean>("copilot_signed_in"),
+  opencodeStatus: () => invoke<OpencodeStatus>("opencode_status"),
+  /** 先探測再存；回傳檢查結果（憑證不回傳）。 */
+  opencodeSaveCredential: (kind: OpencodeCredentialKind, value: string) =>
+    invoke<OpencodeSaveCheck>("opencode_save_credential", { kind, value }),
+  opencodeClearCredential: (kind: OpencodeCredentialKind) => invoke<void>("opencode_clear_credential", { kind }),
   updateState: () => invoke<UpdateState>("update_state"),
   updateCheck: () => invoke<UpdateState>("update_check"),
   updateDownload: () => invoke<UpdateState>("update_download"),
@@ -615,6 +641,20 @@ export interface CopilotDeviceCode {
   interval: number;
 }
 export const onCopilotLogin = on<{ state: "done" | "error"; message: string }>("copilot-login");
+/** OpenCode 的憑證（src-tauri/src/limits/opencode/mod.rs）。只有布林值，沒有憑證內容。 */
+export type OpencodeCredentialKind = "api" | "cookie";
+export interface OpencodeStatus {
+  apiKey: boolean;
+  cookie: boolean;
+  envCookie: boolean;
+  ambientDetected: boolean;
+  ambientClaimed: boolean;
+  /** 額度正在讀哪一個帳號。 */
+  active: "stored" | "env" | "ambient" | "none";
+  /** 另外還有幾個帳號沒有顯示（v1 每個工具只顯示一個帳號）。 */
+  skipped: number;
+}
+export type OpencodeSaveCheck = "saved" | "empty" | "rejected" | "noSubscription" | "unreachable";
 /** 浮動泡泡收合／還原（src-tauri/src/gui/bubble.rs）。 */
 export interface BubbleView {
   collapsed: boolean;
@@ -697,6 +737,30 @@ function mockLimits(now: string): LimitsView {
         ],
       },
       { provider: "codex", accountKey: "", accountLabel: "", accountEmail: "", status: "notConfigured", source: "", updatedAt: now, windows: [] },
+      {
+        provider: "opencode",
+        accountKey: "sha256:preview-oc",
+        accountLabel: "Go",
+        accountEmail: "",
+        status: "ok",
+        source: "api",
+        updatedAt: now,
+        balanceUsd: 18.4,
+        windows: [
+          { ...win("session", "", 22, 2), windowMinutes: 300, source: "web" },
+          { ...win("weekly", "", 41, 70), windowMinutes: 10080, source: "web" },
+          { ...win("billing", "", 18, 300), windowMinutes: 43200, source: "web" },
+          {
+            ...win("billing", "Balance", null, 0),
+            metric: "credits",
+            source: "web",
+            remaining: 18.4,
+            currency: "USD",
+            resetsAt: null,
+            showMeter: false,
+          },
+        ],
+      },
     ],
   };
 }
@@ -845,8 +909,10 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     historyEnabled: true,
     historyIntervalMs: 900_000,
     limitsEnabled: true,
-    limitProviders: ["claude", "codex"],
+    limitProviders: ["claude", "codex", "opencode"],
     limitsRefreshMs: 300_000,
+    opencodeAmbientEnabled: true,
+    opencodeLocalLimitsEnabled: false,
     language: "auto",
     theme: "system",
     automaticAppUpdates: true,
@@ -923,6 +989,18 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
       return mockCompany(now);
     case "limits_get":
       return mockLimits(now);
+    case "opencode_status":
+      return {
+        apiKey: false,
+        cookie: true,
+        envCookie: false,
+        ambientDetected: true,
+        ambientClaimed: false,
+        active: "stored",
+        skipped: 1,
+      } satisfies OpencodeStatus;
+    case "opencode_save_credential":
+      return "saved" satisfies OpencodeSaveCheck;
     case "usage_detail":
       return mockDetail(args?.period === "allTime" ? 20 : args?.period === "month" ? 9 : 1);
     case "service_status_get": {

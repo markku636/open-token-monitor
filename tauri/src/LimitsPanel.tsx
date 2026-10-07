@@ -1,30 +1,28 @@
-// 額度分頁：Claude Code 與 Codex 的用量上限（Rust 端 limits/ 探測，每 5 分鐘一次）。
+// 額度分頁：各工具的用量上限（Rust 端 limits/ 探測，每 5 分鐘一次）。
 
 import { RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type LimitProvider, type LimitWindow, type LimitsView } from "./api";
 import { fmtTime, fmtUntil } from "./format";
 import { t } from "./i18n";
-import { meterTone, moneyText, providerName, statusNote, windowTitle } from "./limits";
+import { accountText, meterTone, providerName, statusNote, windowDisplay, windowTitle } from "./limits";
 import { IconButton } from "./ui";
 
 const TONE_BAR = { danger: "bg-danger", warning: "bg-warning", accent: "bg-accent" } as const;
 
-function WindowRow({ w, now }: { w: LimitWindow; now: number }) {
-  const pct = w.usedPercent;
+function WindowRow({ p, w, now }: { p: LimitProvider; w: LimitWindow; now: number }) {
   const until = fmtUntil(w.resetsAt, now);
-  const money = w.metric === "spend" ? moneyText(w) : "";
+  // 金額型窗口（metric = credits）的主要數字是錢；百分比與進度條只在畫面上推算（windowDisplay）。
+  const { value, used } = windowDisplay(p, w);
   return (
     <li className="py-1">
       <div className="flex items-baseline justify-between gap-2 text-xs">
         <span className="truncate">{windowTitle(w)}</span>
-        <span className="num shrink-0 text-fg/70">
-          {money || (pct === null ? "—" : `${Math.round(pct)}%`)}
-        </span>
+        <span className="num shrink-0 text-fg/70">{value}</span>
       </div>
-      {w.showMeter && pct !== null && (
+      {used !== null && (
         <div className="mt-0.5 h-1 rounded-full bg-fg/10">
-          <div className={`h-1 rounded-full ${TONE_BAR[meterTone(pct)]}`} style={{ width: `${Math.max(2, pct)}%` }} />
+          <div className={`h-1 rounded-full ${TONE_BAR[meterTone(used)]}`} style={{ width: `${Math.max(2, used)}%` }} />
         </div>
       )}
       {until && <div className="mt-0.5 text-2xs text-fg/40">{t("{until}重置", { until })}</div>}
@@ -39,14 +37,14 @@ function ProviderCard({ p, now }: { p: LimitProvider; now: number }) {
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-sm font-medium">{providerName(p.provider)}</span>
         <span className="truncate text-2xs text-fg/45" title={p.accountEmail}>
-          {[p.accountLabel, p.accountEmail].filter(Boolean).join(" · ")}
+          {accountText(p)}
         </span>
       </div>
       {note && <p className={`mt-1 text-2xs ${p.status === "ok" ? "text-fg/45" : "text-warning"}`}>{note}</p>}
       {p.windows.length > 0 && (
         <ul className="mt-1">
           {p.windows.map((w, i) => (
-            <WindowRow key={`${w.kind}-${w.limitId ?? ""}-${w.label}-${i}`} w={w} now={now} />
+            <WindowRow key={`${w.kind}-${w.limitId ?? ""}-${w.label}-${i}`} p={p} w={w} now={now} />
           ))}
         </ul>
       )}

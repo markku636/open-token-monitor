@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { LimitProvider, LimitWindow } from "./api";
-import { meterTone, moneyText, statusNote, windowTitle } from "./limits";
+import {
+  accountText,
+  creditsMeterPercent,
+  creditsText,
+  formatMoney,
+  meterTone,
+  spendText,
+  statusNote,
+  windowDisplay,
+  windowTitle,
+} from "./limits";
 
 const w = (over: Partial<LimitWindow>): LimitWindow => ({
   kind: "session",
@@ -53,8 +63,52 @@ describe("limits", () => {
     expect(statusNote(p({ status: "unavailable", windows: [w({})] }))).toBe("暫時無法取得額度（顯示的是先前的數字）");
   });
 
-  it("formats money windows", () => {
-    expect(moneyText(w({ metric: "spend", used: 2.35, limit: 20, currency: "USD" }))).toBe("$2.35 / $20.00");
-    expect(moneyText(w({ metric: "spend", used: 235, limit: null, currency: "JPY" }))).toBe("JPY 235.00");
+  it("formats money like upstream formatMoney", () => {
+    expect(formatMoney(2.349, "usd")).toBe("$2.35");
+    expect(formatMoney(12, "CNY")).toBe("¥12.00");
+    expect(formatMoney(235, "JPY")).toBe("JPY 235.00");
+    expect(formatMoney(680, "CREDITS")).toBe("680.00");
+    expect(formatMoney(1, "not a code!")).toBe("$1.00");
+    expect(formatMoney(null, "USD")).toBe("");
+  });
+
+  it("says spent when a spend window has no cap", () => {
+    expect(spendText(w({ metric: "spend", used: 2.35, limit: 20, currency: "USD" }))).toBe("$2.35 / $20.00");
+    expect(spendText(w({ metric: "spend", used: 235, limit: null, currency: "JPY" }))).toBe("已花費 JPY 235.00");
+    expect(spendText(w({ metric: "spend", used: null }))).toBe("");
+  });
+
+  it("shows a credits window as money, never as a percentage", () => {
+    const balance = w({ kind: "billing", metric: "credits", label: "Balance", remaining: 18.4, currency: "USD", showMeter: false });
+    const oc = p({ provider: "opencode", windows: [balance] });
+    expect(windowTitle(balance)).toBe("餘額");
+    expect(windowDisplay(oc, balance)).toEqual({ value: "$18.40", used: null });
+    // 沒有固定分母的餘額：以本月花費推算的剩餘比例只給畫面用，已用 = 100 − 剩餘。
+    const metered = { ...balance, showMeter: true };
+    expect(windowDisplay(p({ balance: { monthSpend: 6 } }), { ...metered, remaining: 18 })).toEqual({ value: "$18.00", used: 25 });
+    expect(creditsMeterPercent(p({}), { ...metered, remaining: 0 })).toBe(0);
+    expect(creditsMeterPercent(p({}), { ...metered, remaining: 5 })).toBe(100);
+    expect(creditsMeterPercent(p({}), { ...metered, usedPercent: 30 })).toBe(70);
+    // 舊裝置只有 provider 層的 balance。
+    const bare = { ...metered, remaining: null, currency: null };
+    expect(creditsText(p({ balance: { amount: 3, currency: "CNY" } }), bare)).toBe("¥3.00");
+    expect(creditsText(p({}), { ...bare, detail: "unlimited" })).toBe("unlimited");
+    expect(creditsText(p({}), bare)).toBe("—");
+  });
+
+  it("keeps percentages for quota windows", () => {
+    expect(windowDisplay(p({}), w({ kind: "weekly", usedPercent: 41.6 }))).toEqual({ value: "42%", used: 41.6 });
+    expect(windowDisplay(p({}), w({ kind: "weekly", usedPercent: 41.6, showMeter: false }))).toEqual({ value: "42%", used: null });
+    expect(windowDisplay(p({}), w({ metric: "spend", used: 2.35, limit: 20, usedPercent: 11.75 }))).toEqual({
+      value: "$2.35 / $20.00",
+      used: 11.75,
+    });
+  });
+
+  it("names the OpenCode account and plan once each", () => {
+    expect(accountText(p({ provider: "opencode", accountLabel: "Go" }))).toBe("Go");
+    expect(accountText(p({ accountLabel: "work", planLabel: "Zen" }))).toBe("work · Zen");
+    expect(accountText(p({ accountLabel: "a@b.co", planLabel: "Pro", accountEmail: "a@b.co" }))).toBe("a@b.co · Pro");
+    expect(statusNote(p({ provider: "opencode", status: "notConfigured" }))).toBe("這台電腦沒有登入 OpenCode");
   });
 });

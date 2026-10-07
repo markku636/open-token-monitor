@@ -1,0 +1,13 @@
+{
+  "mode": "single",
+  "ambientKey": "sk-replay-ambient",
+  "env": { "TOKEN_MONITOR_OPENCODE_GO_LIMITS": "12,30,60" },
+  "localRows": [
+    { "createdMs": 1767222000000, "cost": 1.8 },
+    { "createdMs": 1767052800000, "cost": 4.2 },
+    { "createdMs": 1763769600000, "cost": 9.99 }
+  ],
+  "responses": {
+    "goApi": { "status": 503, "text": "upstream unavailable" }
+  }
+}

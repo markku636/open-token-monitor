@@ -35,7 +35,9 @@ pub const SUPPORTED_CLIENTS: &[&str] = &[
     "copilot",
 ];
 
-pub const SUPPORTED_LIMIT_PROVIDERS: &[&str] = &["claude", "codex", "cursor", "copilot"];
+/// 順序與上游 limitProviders.js 的目錄相同（新安裝的預設順序）。
+pub const SUPPORTED_LIMIT_PROVIDERS: &[&str] =
+    &["claude", "codex", "opencode", "cursor", "copilot"];
 
 /// hub 只接受這幾個上傳間隔（src/shared/syncUploadInterval.js）；其他值會被當成 0（即時）。
 pub const SYNC_UPLOAD_INTERVAL_OPTIONS: &[u64] = &[0, 600_000, 1_200_000, 1_800_000];
@@ -104,6 +106,12 @@ pub struct Settings {
     pub limits_enabled: bool,
     pub limit_providers: Vec<String>,
     pub limits_refresh_ms: u64,
+    /// 追蹤 OpenCode 自己存在 auth.json 的 Go key（上游 `opencodeAmbientEnabled`，預設開）。
+    /// 關掉是給登入了不想回報的帳號的電腦用；只影響沒被設定頁的帳號認領的那把 key。
+    pub opencode_ambient_enabled: bool,
+    /// 沒有線上數字時以 OpenCode 的本機資料庫估算 Go 額度（上游 `opencodeLocalLimitsEnabled`，預設關：
+    /// 只看得到這台電腦的紀錄）。
+    pub opencode_local_limits_enabled: bool,
     /// `auto` | `zh-TW` | `en`
     pub language: String,
     /// `system` | `dark` | `light`（前端套色票；system 跟著 Windows 的應用程式模式）
@@ -182,6 +190,8 @@ impl Default for Settings {
                 .map(|s| s.to_string())
                 .collect(),
             limits_refresh_ms: 300_000,
+            opencode_ambient_enabled: true,
+            opencode_local_limits_enabled: false,
             language: "auto".into(),
             theme: "system".into(),
             automatic_app_updates: true,

@@ -1,0 +1,32 @@
+{
+  "mode": "single",
+  "apiKey": "sk-replay-go",
+  "ambientKey": "sk-replay-go",
+  "cookie": "auth=replay-session",
+  "responses": {
+    "goApi": {
+      "status": 200,
+      "json": {
+        "usage": {
+          "rolling": { "status": "ok", "percent": 37.5, "resetsAt": "2026-01-01T03:12:00.000Z" },
+          "weekly": { "status": "ok", "percent": 12, "resetsAt": "2026-01-05T00:00:00.000Z" },
+          "monthly": { "status": "ok", "percent": 4.25, "resetsAt": "2026-01-19T08:00:00.000Z" }
+        }
+      }
+    },
+    "workspaces:GET": { "status": 200, "text": "$R[0]=[$R[1]={id:\"wrk_01REPLAY\",name:\"Replay\",slug:null}]" },
+    "goPage": {
+      "status": 200,
+      "text": "<html><script>self.__data={rollingUsage:{status:\"ok\",usagePercent:36,resetInSec:11400},weeklyUsage:{usagePercent:11,resetInSec:345600},monthlyUsage:{usagePercent:4,resetInSec:1584000}}</script></html>"
+    },
+    "subscription:GET": {
+      "status": 200,
+      "json": {
+        "plan": null,
+        "rollingUsage": { "usagePercent": 0.37, "resetInSec": 11520 },
+        "weeklyUsage": { "usagePercent": 12 },
+        "billing": { "balanceUSD": 23.5 }
+      }
+    }
+  }
+}

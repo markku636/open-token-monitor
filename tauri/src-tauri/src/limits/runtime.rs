@@ -19,6 +19,7 @@ use std::time::Duration;
 use super::claude::{ClaudeEnv, ClaudeProvider};
 use super::codex::{self, CodexEnv};
 use super::http::ProbeError;
+use super::opencode::OpencodeOptions;
 use crate::wire::{LimitProvider, LimitsSummary, ProviderStatus};
 
 pub const PROBE_DEADLINE: Duration = Duration::from_secs(125);
@@ -86,6 +87,8 @@ pub fn next_reset_boundary(
 pub struct LimitsConfig {
     pub providers: Vec<String>,
     pub refresh_ms: u64,
+    /// OpenCode 的開關（自動偵測的 key、本機估算）；憑證本身不在這裡，探測時才從認證管理員讀。
+    pub opencode: OpencodeOptions,
 }
 
 impl LimitsConfig {
@@ -94,6 +97,7 @@ impl LimitsConfig {
         (settings.limits_enabled && !settings.limit_providers.is_empty()).then(|| LimitsConfig {
             providers: settings.limit_providers.clone(),
             refresh_ms: settings.limits_refresh_ms,
+            opencode: OpencodeOptions::from_settings(settings),
         })
     }
 }
@@ -155,6 +159,7 @@ impl LimitsRuntime {
                         .await
                 }
                 "codex" => codex::probe(&self.http, &CodexEnv::from_process()).await,
+                "opencode" => super::opencode::probe(&self.http, &self.config.opencode).await,
                 "copilot" => super::copilot::probe(&self.http).await,
                 "cursor" => match dirs::home_dir() {
                     Some(home) => super::cursor::probe(&self.http, &home).await,
@@ -272,6 +277,7 @@ mod tests {
         let mut rt = LimitsRuntime::new(LimitsConfig {
             providers: vec!["claude".into()],
             refresh_ms: 300_000,
+            opencode: OpencodeOptions::default(),
         });
         assert_eq!(rt.apply("claude", Ok(good())).status, ProviderStatus::Ok);
         let row = rt.apply(
