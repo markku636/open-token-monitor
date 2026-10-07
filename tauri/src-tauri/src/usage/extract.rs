@@ -247,6 +247,26 @@ fn add_session(period: &mut Period, session: Session) {
     merge_session(target, &session);
 }
 
+/// 期間相加用的 `addSession`（usage/merge.rs）：來源是另一個期間裡已經成形的 session。
+/// `archived` 照上游 `mergeSession` 的規則：只要有一個來源不是 archived，合併後就不是。
+pub(crate) fn add_session_ref(period: &mut Period, session: &Session) {
+    if session.client.is_empty() || session.session_id.is_empty() {
+        return;
+    }
+    let key = format!("{}:{}", session.client, session.session_id);
+    if is_reasonix_synthetic(&session.client, &session.session_id, &key) {
+        return;
+    }
+    let fresh = !period.sessions.contains_key(&key);
+    let target = period.sessions.entry(key).or_insert_with(|| Session {
+        client: session.client.clone(),
+        session_id: session.session_id.clone(),
+        ..Session::default()
+    });
+    merge_session(target, session);
+    target.archived = session.archived && (fresh || target.archived);
+}
+
 pub fn add_usage_row_to_period(period: &mut Period, row: &Obj, client: Option<&str>) {
     let tokens = token_value_for_client(row, client);
     let cost = cost_value(row);

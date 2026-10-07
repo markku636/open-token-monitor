@@ -10,6 +10,15 @@ export type WindowMode = "floating" | "normal" | "desktop" | "tray";
 export type ThemeSetting = "system" | "dark" | "light";
 export type ValueSource = "cli" | "env" | "settings" | "keyring" | "baked" | "none";
 export type ClientStatus = "active" | "waiting" | "missing";
+/** WSL 掃描的狀態（wire/record.rs `WslState`，上游 collector.js 的 `wslStatus.state`）。 */
+export type WslState = "active" | "no-data" | "not-running" | "not-installed" | "disabled";
+
+/** `detected` = 找到資料夾標記的工具；`withData` = WSL 裡掃到 token 的工具。 */
+export interface WslStatus {
+  state: WslState;
+  detected: string[];
+  withData: string[];
+}
 export type UploadState = "disabled" | "pending" | "ok" | "error";
 export type PeriodName = "today" | "month" | "allTime";
 /** 由每日歷史推出的範圍（src-tauri/src/ranges.rs）。 */
@@ -33,6 +42,7 @@ export interface Settings {
   watchEnabled: boolean;
   watchDebounceMs: number;
   sessionUsageArchiveEnabled: boolean;
+  wslScanEnabled: boolean;
   historyEnabled: boolean;
   historyIntervalMs: number;
   limitsEnabled: boolean;
@@ -77,6 +87,8 @@ export interface SettingsView extends Settings {
   buildChannel: "corp" | "dev";
   appVersion: string;
   supportedClients: string[];
+  /** 這個平台能掃 WSL（Windows）。 */
+  wslSupported: boolean;
 }
 
 export type SettingsPatch = Partial<
@@ -89,6 +101,7 @@ export type SettingsPatch = Partial<
     | "collectionIntervalMs"
     | "watchEnabled"
     | "sessionUsageArchiveEnabled"
+    | "wslScanEnabled"
     | "historyEnabled"
     | "historyIntervalMs"
     | "limitsEnabled"
@@ -148,6 +161,8 @@ export interface LocalStats {
   periodWindows: { timeZone?: string; today: { key: string; endsAt: string }; month: { key: string; endsAt: string } };
   trackedClients: string[];
   clientStatus: Record<string, ClientStatus>;
+  /** 沒有 WSL 的平台是 null。 */
+  wslStatus: WslStatus | null;
   history: HistoryPreview | null;
 }
 
@@ -842,6 +857,7 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     watchEnabled: true,
     watchDebounceMs: 1_500,
     sessionUsageArchiveEnabled: true,
+    wslScanEnabled: true,
     historyEnabled: true,
     historyIntervalMs: 900_000,
     limitsEnabled: true,
@@ -877,6 +893,7 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     buildChannel: "dev",
     appVersion: __APP_VERSION__,
     supportedClients: ["claude", "codex", "opencode", "hermes", "cursor", "antigravity", "copilot"],
+    wslSupported: true,
   };
   const now = new Date().toISOString();
   switch (cmd) {
@@ -893,6 +910,7 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
         periodWindows: { today: { key: now.slice(0, 10), endsAt: now }, month: { key: now.slice(0, 7), endsAt: now } },
         trackedClients: ["claude", "codex", "copilot"],
         clientStatus: { claude: "active", codex: "active", copilot: "waiting" },
+        wslStatus: { state: "active", detected: ["claude", "hermes"], withData: ["claude"] },
         history: mockHistory(now.slice(0, 10)),
       } satisfies LocalStats;
     case "status_get":

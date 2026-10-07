@@ -40,6 +40,7 @@ use super::events::{CoreEvent, ErrorInfo, EventSink};
 use super::sink::{OrderedSink, SendFn};
 use super::state::{DeviceState, Published};
 use crate::collector::watch::{self, WatchRoot};
+use crate::collector::wsl::with_wsl;
 use crate::collector::{
     collect_anchored, collect_history, collect_once, local_today_key, Anchor, Collected,
     CollectorConfig, ProgressFn, ScanProgress, ScanSource,
@@ -50,7 +51,7 @@ use crate::limits::runtime::{LimitsConfig, LimitsRuntime};
 use crate::usage::archive::CaptureAt;
 use crate::usage::archive_store::ArchiveStore;
 use crate::wire::time::iso_millis;
-use crate::wire::{DeviceRecord, Envelope, UsageSummary};
+use crate::wire::{DeviceRecord, Envelope, Period, UsageSummary};
 
 const FINAL_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 /// 錨點再怎麼有效，也至少每小時完整掃一次，補上 delta 看不到的變化（上游 FULL_SCAN_INTERVAL_MS）。
@@ -143,11 +144,23 @@ impl TickReason {
     }
 }
 
+/// `self_sync` 與 `refresh_wsl` 目前同進退（定時與啟動的 anchored tick 都做，檔案變動觸發的都不做），
+/// 但規則不同：前者是 Cursor / Antigravity 的 cache 沒有檔案事件，後者是 WSL 不能等到下一次完整掃描
+/// （上游 loop() 的 `refreshWsl: true`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TickPlan {
     Full,
-    Anchored { self_sync: bool },
+    Anchored { self_sync: bool, refresh_wsl: bool },
 }
+
+const TIMED_ANCHORED: TickPlan = TickPlan::Anchored {
+    self_sync: true,
+    refresh_wsl: true,
+};
+const WATCH_ANCHORED: TickPlan = TickPlan::Anchored {
+    self_sync: false,
+    refresh_wsl: false,
+};
 
 /// 上游 collector.js `loop` / `scheduleTick` 的決策，抽成純函式方便測試。
 pub fn plan_tick(
@@ -162,16 +175,10 @@ pub fn plan_tick(
     match reason {
         TickReason::Manual | TickReason::Once => TickPlan::Full,
         // 重開程式後有今天、一小時內的持久化錨點：只掃 today（上游 startCollector 讀回錨點）。
-        TickReason::Startup if usable(Some(FULL_SCAN_INTERVAL)) => {
-            TickPlan::Anchored { self_sync: true }
-        }
+        TickReason::Startup if usable(Some(FULL_SCAN_INTERVAL)) => TIMED_ANCHORED,
         TickReason::Startup => TickPlan::Full,
-        TickReason::Watch | TickReason::HistoryRetry if usable(None) => {
-            TickPlan::Anchored { self_sync: false }
-        }
-        TickReason::Interval if usable(Some(FULL_SCAN_INTERVAL)) => {
-            TickPlan::Anchored { self_sync: true }
-        }
+        TickReason::Watch | TickReason::HistoryRetry if usable(None) => WATCH_ANCHORED,
+        TickReason::Interval if usable(Some(FULL_SCAN_INTERVAL)) => TIMED_ANCHORED,
         _ => TickPlan::Full,
     }
 }
@@ -240,11 +247,18 @@ impl DeviceRuntime {
             }
             anchor
         });
+        let wsl_supported = cfg.source.wsl_host().is_some();
         let seed = restored
             .as_ref()
             .filter(|_| cfg.seed_from_anchor)
             .and_then(|(anchor, at)| {
-                at.map(|at| anchor.to_summary(&cfg.collector, at.with_timezone(&chrono::Local)))
+                at.map(|at| {
+                    anchor.to_summary(
+                        &cfg.collector,
+                        at.with_timezone(&chrono::Local),
+                        wsl_supported,
+                    )
+                })
             });
         let rt = DeviceRuntime {
             state: Mutex::new(DeviceState::new(cfg.envelope, cfg.upload_interval_ms)),
@@ -522,19 +536,33 @@ impl DeviceRuntime {
             &today_key,
         );
         match (plan, &anchor) {
-            (TickPlan::Anchored { self_sync }, Some(anchor)) if anchor.usable_on(&today_key) => {
-                collect_anchored(
+            (
+                TickPlan::Anchored {
+                    self_sync,
+                    refresh_wsl,
+                },
+                Some(anchor),
+            ) if anchor.usable_on(&today_key) => {
+                let mut collected = collect_anchored(
                     &self.source,
                     &self.collector,
                     anchor,
                     self_sync,
+                    refresh_wsl,
                     &self.cancel,
                 )
-                .await
+                .await?;
+                // 重新掃過的 WSL 換進錨點（只在記憶體；上游也只在完整掃描時寫檔）。
+                if let Some(snapshot) = collected.wsl_refresh.take() {
+                    if let Some(current) = self.anchor.lock().unwrap().as_mut() {
+                        current.wsl = snapshot;
+                    }
+                }
+                Ok(collected)
             }
             _ => {
                 let preview = |p: ScanProgress<'_>| self.publish_preview(p, anchor.as_ref());
-                let collected = collect_once(
+                let mut collected = collect_once(
                     &self.source,
                     &self.collector,
                     reason == TickReason::Manual,
@@ -542,13 +570,14 @@ impl DeviceRuntime {
                     &self.cancel,
                 )
                 .await?;
-                let anchor = Anchor::from_summary(&collected.summary);
-                if let Some(path) = &self.anchor_file {
-                    if let Err(e) = anchor.save(path, &self.collector) {
-                        tracing::warn!(error = %e, "collector anchor write failed");
+                if let Some(anchor) = collected.anchor.take() {
+                    if let Some(path) = &self.anchor_file {
+                        if let Err(e) = anchor.save(path, &self.collector) {
+                            tracing::warn!(error = %e, "collector anchor write failed");
+                        }
                     }
+                    *self.anchor.lock().unwrap() = Some(anchor);
                 }
-                *self.anchor.lock().unwrap() = Some(anchor);
                 self.rearm_watcher_if_roots_changed();
                 Ok(collected)
             }
@@ -559,30 +588,55 @@ impl DeviceRuntime {
     /// 以精確 delta 推出，與 anchored tick 同一條算式；錨點不能用（跨日）就沿用上一筆。
     /// 兩者都沒有時不發佈（上游 deviceState `hasCompleteUsageBaseline`）：只有 today 的
     /// record 會讓 month / allTime 顯示成 0。預覽只補 archive、不寫：最後的結果會寫。
+    ///
+    /// 掃到的與推出的都只是主機的部分，再加上錨點凍結的 WSL 快照（上游 `wslPeriodsForPreview`：
+    /// today 只加同一天的、month 只加同一個月的），WSL 的用量才不會在掃描中消失又出現。沿用
+    /// 上一筆的期間本來就含 WSL，不再加。`wslStatus` 沿用畫面上那一筆的（上游的預覽不帶，
+    /// main.js 沿用上一筆）。
     fn publish_preview(&self, p: ScanProgress<'_>, anchor: Option<&Anchor>) {
         let today_key = local_today_key(p.collected_at);
-        let (month, all_time) = match anchor.filter(|a| a.usable_on(&today_key)) {
+        let cfg = &self.collector;
+        let frozen = anchor.and_then(|a| a.wsl.bundle.as_ref());
+        let (wsl_today, wsl_month) = crate::collector::wsl::wsl_periods_for_preview(
+            frozen,
+            anchor.map_or("", |a| a.date_key.as_str()),
+            &today_key,
+        );
+        let add_wsl =
+            |host: Period, wsl: Option<&Period>| with_wsl(cfg.projects_enabled, host, wsl);
+        let baseline_status = {
+            let state = self.state.lock().unwrap();
+            state.baseline().map(|b| b.wsl_status.clone())
+        };
+        let (month, all_time, status) = match anchor.filter(|a| a.usable_on(&today_key)) {
             Some(anchor) => {
-                let (month, all_time) = anchor.periods_with(&self.collector, p.today);
-                (p.month.cloned().unwrap_or(month), all_time)
+                let (month, all_time) = anchor.periods_with(cfg, p.today);
+                let month = p.month.cloned().unwrap_or(month);
+                (
+                    add_wsl(month, wsl_month),
+                    add_wsl(all_time, frozen.map(|b| &b.all_time)),
+                    baseline_status.unwrap_or_else(|| anchor.wsl.status.clone()),
+                )
             }
             None => {
                 let state = self.state.lock().unwrap();
                 let Some(base) = state.baseline() else {
                     return;
                 };
-                (
-                    p.month.cloned().unwrap_or_else(|| base.month.clone()),
-                    base.all_time.clone(),
-                )
+                let month = match p.month {
+                    Some(month) => add_wsl(month.clone(), wsl_month),
+                    None => base.month.clone(),
+                };
+                (month, base.all_time.clone(), base.wsl_status.clone())
             }
         };
         let summary = crate::collector::summary_of(
-            &self.collector,
+            cfg,
             p.collected_at,
-            p.today.clone(),
+            add_wsl(p.today.clone(), wsl_today),
             month,
             all_time,
+            status,
         );
         let summary = self.archive_projection(summary, false);
         let published = self.state.lock().unwrap().update_usage(summary);
@@ -824,7 +878,7 @@ impl DeviceRuntime {
         let rt = Arc::new(DeviceRuntime::build(cfg, None));
         let reason = if let Some(source) = anchor_source {
             let collected = collect_once(&source, &rt.collector, false, None, &rt.cancel).await?;
-            *rt.anchor.lock().unwrap() = Some(Anchor::from_summary(&collected.summary));
+            *rt.anchor.lock().unwrap() = collected.anchor;
             TickReason::Watch
         } else {
             TickReason::Once
@@ -872,7 +926,7 @@ mod tests {
                 Some((today, Duration::from_secs(600))),
                 today
             ),
-            TickPlan::Anchored { self_sync: true }
+            TIMED_ANCHORED
         );
         assert_eq!(
             plan_tick(TickReason::Startup, Some((today, 2 * HOUR)), today),
@@ -894,7 +948,7 @@ mod tests {
         let anchor = Some(("2026-09-24", 2 * HOUR));
         assert_eq!(
             plan_tick(TickReason::Watch, anchor, "2026-09-24"),
-            TickPlan::Anchored { self_sync: false },
+            WATCH_ANCHORED,
             "a watch tick never waits for the hourly full scan"
         );
         assert_eq!(
@@ -942,7 +996,7 @@ mod tests {
                 Some(("2026-09-24", 2 * HOUR)),
                 "2026-09-24"
             ),
-            TickPlan::Anchored { self_sync: false }
+            WATCH_ANCHORED
         );
     }
 
@@ -955,7 +1009,7 @@ mod tests {
                 Some((today, HOUR - Duration::from_secs(1))),
                 today
             ),
-            TickPlan::Anchored { self_sync: true }
+            TIMED_ANCHORED
         );
         assert_eq!(
             plan_tick(TickReason::Interval, Some((today, HOUR)), today),
@@ -1007,6 +1061,7 @@ mod tests {
                     all_time_since: "2024-01-01".into(),
                     projects_enabled: false,
                     history_enabled: false,
+                    wsl_scan_enabled: true,
                 },
                 source: ScanSource::Fixtures(dir.into()),
                 collection_interval: Duration::from_secs(300),
@@ -1087,5 +1142,66 @@ mod tests {
         let (seen, events) = recorder();
         let _rt = fixture_runtime(dir.path(), events, Some(anchor_file), true);
         assert!(seen.lock().unwrap().is_empty());
+    }
+
+    /// 假的 WSL：Ubuntu 裡 alice 的 Claude（session `w`）。
+    fn write_wsl(dir: &std::path::Path, today: i64, month: i64, all_time: i64) {
+        let home = r"\\wsl$\Ubuntu\home\alice";
+        let row = |tokens: i64| serde_json::json!({ "entries": [{ "client": "claude", "sessionId": "w", "model": "m", "input": tokens }] });
+        let wsl = serde_json::json!({
+            "installed": true,
+            "running": ["Ubuntu"],
+            "paths": [format!(r"{home}\.claude\projects")],
+            "scans": { home: { "today": row(today), "month": row(month), "alltime": row(all_time) } },
+        });
+        std::fs::write(
+            dir.join(crate::collector::wsl::FIXTURE_FILE),
+            wsl.to_string(),
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn wsl_rides_along_previews_and_only_timed_ticks_rescan_it() {
+        let dir = tempfile::tempdir().unwrap();
+        write_periods(dir.path(), 1, 10, 100);
+        write_wsl(dir.path(), 1000, 2000, 3000);
+        let (seen, events) = recorder();
+        let rt = fixture_runtime(dir.path(), events, None, false);
+        rt.do_tick_inner(TickReason::Manual).await.unwrap();
+        assert_eq!(*seen.lock().unwrap(), vec![(1, 1001, 2010, 3100)]);
+        let status = rt.snapshot().unwrap().wsl_status.clone().unwrap();
+        assert_eq!(status.state, crate::wire::WslState::Active);
+        assert_eq!(status.detected, ["claude"]);
+
+        // 完整掃描中的預覽：主機的部分以錨點 delta 推出，再加上凍結的 WSL；最後換成新掃的 WSL。
+        write_periods(dir.path(), 5, 20, 200);
+        write_wsl(dir.path(), 4000, 5000, 6000);
+        rt.do_tick_inner(TickReason::Manual).await.unwrap();
+        assert_eq!(
+            seen.lock().unwrap()[1..],
+            [
+                (2, 1005, 2014, 3104),
+                (3, 1005, 2020, 3104),
+                (4, 4005, 5020, 6200)
+            ]
+        );
+
+        // 檔案變動觸發的 tick 沿用凍結的 WSL；主機的 month / allTime 是精確 delta。
+        write_periods(dir.path(), 7, 20, 200);
+        write_wsl(dir.path(), 7000, 8000, 9000);
+        rt.do_tick_inner(TickReason::Watch).await.unwrap();
+        assert_eq!(seen.lock().unwrap()[4], (5, 4007, 5022, 6202));
+
+        // 定時 tick 重新掃 WSL，之後的檔案變動沿用新的快照；錨點的主機期間不變。
+        rt.do_tick_inner(TickReason::Interval).await.unwrap();
+        rt.do_tick_inner(TickReason::Watch).await.unwrap();
+        assert_eq!(
+            seen.lock().unwrap()[5..],
+            [(6, 7007, 8022, 9202), (7, 7007, 8022, 9202)]
+        );
+        let anchor = rt.anchor.lock().unwrap().clone().unwrap();
+        assert_eq!(anchor.today.total_tokens, 5);
+        assert_eq!(anchor.wsl.bundle.unwrap().today.total_tokens, 7000);
     }
 }

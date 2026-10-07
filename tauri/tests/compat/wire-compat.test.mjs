@@ -342,6 +342,173 @@ test("watch tick: anchored today + exact delta match upstream", { skip }, () => 
   assertSame(payload, plain(serializeSyncPayload(record).payload), "watch payload");
 });
 
+// ---- WSL ----------------------------------------------------------------------
+// 固定 JSON 目錄裡的 wsl.json 描述一個假的 WSL 環境（collector/wsl.rs `FixtureWsl`）。同一份描述
+// 以 deps 注入上游 collectWslUsage / probeWslState（登錄檔、wsl.exe、\\wsl$ 檔案系統與 tokscale 都換掉），
+// 再以上游 mergePeriods 加上主機的期間、applyProjectRollups（發佈前），逐欄比對。
+
+const UBUNTU = String.raw`\\wsl$\Ubuntu`;
+
+function wslFixture(aliceDir) {
+  const read = (dir, file) => JSON.parse(fs.readFileSync(path.join(dir, `${file}.json`), "utf8"));
+  const codex = (tokens) => ({
+    entries: [{ client: "codex", sessionId: "wsl-root", modelId: "gpt-5.5", input: tokens, output: 10, cacheRead: 30, cost: 0.01 }],
+  });
+  return {
+    installed: true,
+    running: ["Ubuntu", "docker-desktop"],
+    paths: [
+      String.raw`${UBUNTU}\home\alice\.claude\projects\repo\a.jsonl`,
+      String.raw`${UBUNTU}\home\bob\.kimi-code\sessions`,
+      String.raw`${UBUNTU}\home\bob\.config\Code\User\workspaceStorage\abc\chatSessions\x.json`,
+      String.raw`${UBUNTU}\root\.hermes\state.db`,
+      String.raw`${UBUNTU}\root\.codex\sessions`,
+      String.raw`\\wsl$\Debian\home\carol\.claude\projects`,
+    ],
+    scans: {
+      // alice 的紀錄與主機的 fixture 相同：同一個 session 兩邊都有時要相加（mergeSession）。
+      [String.raw`${UBUNTU}\home\alice`]: { today: read(aliceDir, "today"), month: read(aliceDir, "month"), alltime: read(aliceDir, "alltime") },
+      [String.raw`${UBUNTU}\root`]: { today: codex(40), month: codex(400), alltime: codex(4000) },
+      // Debian 沒在跑：就算有資料也不掃。
+      [String.raw`\\wsl$\Debian\home\carol`]: { today: codex(9e6), month: codex(9e6), alltime: codex(9e6) },
+    },
+  };
+}
+
+function upstreamWslDeps(fixture) {
+  const children = (dir) => {
+    let found = false;
+    const names = new Set();
+    for (const p of fixture.paths) {
+      if (p === dir) found = true;
+      else if (p.startsWith(`${dir}\\`)) {
+        found = true;
+        const name = p.slice(dir.length + 1).split("\\")[0];
+        if (name) names.add(name);
+      }
+    }
+    return found ? [...names] : null;
+  };
+  return {
+    platform: "win32",
+    exec: (cmd) => {
+      if (cmd === "reg") {
+        if (!fixture.installed) throw new Error("ERROR: The system was unable to find the specified registry key");
+        return "";
+      }
+      return fixture.running.join("\r\n");
+    },
+    existsSync: (p) => fixture.paths.some((q) => q === p || q.startsWith(`${p}\\`)),
+    readdirSync: (dir) => {
+      const names = children(dir);
+      if (!names) throw Object.assign(new Error(`ENOENT: ${dir}`), { code: "ENOENT" });
+      return names;
+    },
+  };
+}
+
+// 上游 collectUsageOnce 的 WSL 段落（Windows、完整掃描）：collectWslUsage → wslStatus。
+async function upstreamWsl(fixture, clients) {
+  const { collectWslUsage, probeWslState } = up("wslUsage.js");
+  const { applyTokscaleSessionMetadata } = up("sessionMetadata.js");
+  const deps = upstreamWslDeps(fixture);
+  const calls = [];
+  const { bundle, detected } = await collectWslUsage(
+    {
+      clients,
+      trackedClients: clients,
+      allTimeSince: "2024-01-01",
+      now: new Date(),
+      // 與上游 runTokscaleFn 相同：每次掃描先摺入 session / workspace metadata。
+      runTokscale: async ({ flags }) => {
+        const home = flags[flags.indexOf("--home") + 1];
+        calls.push(`${flags[0]} ${home}`);
+        const stem = flags[0] === "--today" ? "today" : flags[0] === "--month" ? "month" : "alltime";
+        const json = structuredClone(fixture.scans[home]?.[stem] ?? { entries: [] });
+        applyTokscaleSessionMetadata(json, { resolveProjects: true });
+        return json;
+      },
+    },
+    deps,
+  );
+  const probe = probeWslState(deps);
+  const withData = Object.keys(bundle.allTime.clients || {});
+  const status = probe !== "ok" ? { state: probe, detected: [], withData: [] } : { state: withData.length > 0 ? "active" : "no-data", detected, withData };
+  return { bundle, status, calls };
+}
+
+function mergedWithWsl(host, bundle) {
+  const usage = up("usage.js");
+  const summary = {
+    today: usage.mergePeriods(host.today, bundle.today),
+    month: usage.mergePeriods(host.month, bundle.month),
+    allTime: usage.mergePeriods(host.allTime, bundle.allTime),
+  };
+  usage.applyProjectRollups(summary);
+  return plain(summary);
+}
+
+function checkWslRecord(record, payload, theirs, status, tag) {
+  for (const [name] of PERIOD_FILES) {
+    assertSame(plain(record[name]), withoutTitles(theirs[name]), `${tag} period ${name}`);
+  }
+  assert.deepEqual(record.wslStatus, plain(status), `${tag} wslStatus`);
+  const { normalizeDeviceRecord } = up("usage.js");
+  assert.deepEqual(plain(normalizeDeviceRecord(record)).wslStatus, record.wslStatus, `${tag} hub keeps wslStatus`);
+  const { serializeSyncPayload } = up("syncPayload.js");
+  assertSame(payload, plain(serializeSyncPayload(record).payload), `${tag} payload`);
+}
+
+test("WSL: full scan merges the WSL bundle and reports wslStatus like upstream", { skip }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tm-wsl-"));
+  try {
+    for (const [, file] of PERIOD_FILES) fs.copyFileSync(path.join(FIXTURE, `${file}.json`), path.join(dir, `${file}.json`));
+    const fixture = wslFixture(FIXTURE);
+    fs.writeFileSync(path.join(dir, "wsl.json"), JSON.stringify(fixture));
+    const [record, payload] = runAgent(agentBin(), dir, ["--json", "--payload"]);
+    const { bundle, status, calls } = await upstreamWsl(fixture, record.trackedClients.join(","));
+    assert.equal(status.state, "active");
+    assert.ok(status.detected.includes("hermes") && !status.withData.includes("hermes"), "a marker without usage is the diagnostic");
+    assert.ok(!status.detected.includes("kimi"), "untracked tools never surface");
+    assert.ok(!calls.some((c) => c.includes("Debian")), "stopped distros are not scanned");
+    assert.notEqual(record.clientStatus.hermes, "missing", "a tool found only inside WSL is installed");
+    checkWslRecord(record, payload, mergedWithWsl(upstreamSummary(dir), bundle), status, "wsl");
+    assert.ok(record.allTime.sessions["codex:wsl-root"], "WSL sessions reach the record");
+
+    // 關掉 WSL 掃描：只剩主機的期間，狀態是 disabled（不是 null）。
+    const [off] = runAgent(agentBin(), dir, ["--json", "--wsl-scan", "0"]);
+    for (const [name] of PERIOD_FILES) {
+      assertSame(plain(off[name]), withoutTitles(upstreamSummary(dir)[name]), `wsl off period ${name}`);
+    }
+    assert.deepEqual(off.wslStatus, { state: "disabled", detected: [], withData: [] });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("WSL: a watch tick reuses the frozen WSL snapshot and keeps the host delta exact", { skip }, async () => {
+  const anchorDir = fs.mkdtempSync(path.join(os.tmpdir(), "tm-wsl-anchor-"));
+  const freshDir = fs.mkdtempSync(path.join(os.tmpdir(), "tm-wsl-fresh-"));
+  try {
+    for (const [, file] of PERIOD_FILES) fs.copyFileSync(path.join(FIXTURE, `${file}.json`), path.join(anchorDir, `${file}.json`));
+    const watchFixture = path.join(root, "src-tauri", "tests", "fixtures", "tokscale", "watch");
+    fs.copyFileSync(path.join(watchFixture, "today.json"), path.join(freshDir, "today.json"));
+    const frozen = wslFixture(FIXTURE);
+    fs.writeFileSync(path.join(anchorDir, "wsl.json"), JSON.stringify(frozen));
+    // WSL 在錨點之後也變了；檔案變動觸發的 tick 不能看到（不隔著 9P 重新掃）。
+    const later = wslFixture(FIXTURE);
+    later.scans[String.raw`${UBUNTU}\home\alice`] = frozen.scans[String.raw`${UBUNTU}\root`];
+    fs.writeFileSync(path.join(freshDir, "wsl.json"), JSON.stringify(later));
+
+    const [record, payload] = runAgent(agentBin(), freshDir, ["--anchor-json-dir", anchorDir, "--json", "--payload"]);
+    const { bundle, status } = await upstreamWsl(frozen, record.trackedClients.join(","));
+    checkWslRecord(record, payload, mergedWithWsl(upstreamWatchTick(anchorDir, freshDir), bundle), status, "wsl watch");
+  } finally {
+    fs.rmSync(anchorDir, { recursive: true, force: true });
+    fs.rmSync(freshDir, { recursive: true, force: true });
+  }
+});
+
 // 上游 providers/codex/limits.js `normalizeCodexUsagePayload` 原文（沒有匯出，照抄當參考實作）：
 // wham 回應先轉成 rateLimits / rateLimitsByLimitId，再交給 mapCodexRateLimitsToProvider。
 function upstreamNormalizeCodexUsagePayload(payload = {}) {

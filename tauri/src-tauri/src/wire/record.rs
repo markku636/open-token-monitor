@@ -4,7 +4,8 @@
 //! envelope 與 limits（deviceState.js `publish`）。hub 端 `normalizeDeviceRecord()`
 //! 只在 `hasOwn` 時處理 osName / trackedClients / clientStatus / periodWindows /
 //! historyAvailable / syncUploadIntervalMs，所以這些欄位都要明確送出。
-//! 不送 `wslStatus` / `clientHealth`（v1 不產生），hub 視為未提供。
+//! `wslStatus` 與上游 collector 相同每筆都帶：Windows 上是 WSL 掃描的狀態，其他平台是 `null`。
+//! 不送 `clientHealth`（v1 不產生），hub 視為未提供。
 //! `history` 是三態：不帶（hub 保留舊的）、`null`（關閉）、物件（整份取代）。
 
 use std::sync::Arc;
@@ -26,6 +27,44 @@ pub enum ClientStatus {
     Waiting,
     /// 本機沒有這個工具的資料夾。
     Missing,
+}
+
+/// WSL 掃描的狀態（上游 collector.js 的 `wslStatus`；hub `normalizeWslStatus` 只收這五個值）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WslState {
+    /// 有執行中的 distro，而且掃到了用量。
+    Active,
+    /// 有執行中的 distro，但沒有任何用量。
+    NoData,
+    /// 裝了 WSL，但沒有執行中的 distro（不會替使用者啟動 WSL）。
+    NotRunning,
+    /// 沒有 `HKCU\…\Lxss`。
+    NotInstalled,
+    /// 設定 `wslScanEnabled` 關閉。
+    Disabled,
+}
+
+/// `detected` = 找到資料夾標記的工具（只含追蹤中的）；`withData` = WSL 的 allTime 裡有 token 的工具。
+/// 兩者的差就是診斷（例如 Hermes 的資料庫隔著 9P 讀不到）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WslStatus {
+    pub state: WslState,
+    #[serde(default)]
+    pub detected: Vec<String>,
+    #[serde(default)]
+    pub with_data: Vec<String>,
+}
+
+impl WslStatus {
+    pub fn empty(state: WslState) -> WslStatus {
+        WslStatus {
+            state,
+            detected: Vec::new(),
+            with_data: Vec::new(),
+        }
+    }
 }
 
 /// 每個程序固定不變的裝置識別。
@@ -56,6 +95,8 @@ pub struct UsageSummary {
     pub projects_enabled: bool,
     pub tracked_clients: Vec<String>,
     pub client_status: IndexMap<String, ClientStatus>,
+    /// `None` = 這個平台沒有 WSL（或沒有追蹤任何工具）；Windows 上一定有值。
+    pub wsl_status: Option<WslStatus>,
     pub period_windows: PeriodWindows,
     /// 上游 `historyAvailable = historyEnabled !== false`。
     pub history_available: bool,
@@ -84,6 +125,9 @@ pub struct DeviceRecord {
     pub projects_enabled: bool,
     pub tracked_clients: Vec<String>,
     pub client_status: IndexMap<String, ClientStatus>,
+    /// 每筆都帶，沒有時是 `null`（上游 summary 的 `wslStatus: null`）。
+    #[serde(default)]
+    pub wsl_status: Option<WslStatus>,
     pub period_windows: PeriodWindows,
     /// 每筆都明確送：hub 只在 `hasOwn` 時才更新這個旗標。
     pub history_available: bool,
@@ -129,6 +173,7 @@ impl DeviceRecord {
             projects_enabled: usage.projects_enabled,
             tracked_clients: usage.tracked_clients.clone(),
             client_status: usage.client_status.clone(),
+            wsl_status: usage.wsl_status.clone(),
             period_windows: usage.period_windows.clone(),
             history_available: usage.history_available,
             sync_upload_interval_ms,

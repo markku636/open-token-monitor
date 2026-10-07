@@ -225,6 +225,19 @@ export const EN: Record<string, string> = {
   "讀取這台電腦上 Claude Code、Codex 與 Cursor 的登入，查詢用量上限；不會上傳任何 token": "Reads the Claude Code, Codex and Cursor sign-ins on this PC to look up usage limits; no token is ever uploaded",
   "保留已刪除的 session": "Keep deleted sessions",
   "Claude Code 預設 30 天後刪掉舊紀錄；開啟時那些用量仍算進本月與全部（只存在這台電腦）": "Claude Code deletes old transcripts after 30 days by default; when on, their usage still counts toward this month and all time (kept on this PC only)",
+  // WSL（設定頁，上游 settings.collection.wslScan / wslPanel）
+  "掃描 WSL 裡的工具": "Scan tools inside WSL",
+  "關閉後，Windows 不再隔著 {path} 掃描 WSL 裡的工具。WSL 裡另外有 agent 在上傳用量時請關閉，避免重複計算。":
+    "When off, Windows no longer scans WSL tools over {path}. Turn it off when an agent inside WSL already uploads that usage, to avoid counting it twice.",
+  "WSL 偵測": "WSL detection",
+  "偵測中": "Detecting",
+  "未偵測到資料": "No data detected",
+  "WSL 未執行": "WSL not running",
+  "未安裝": "Not installed",
+  "有資料": "has data",
+  "無資料": "no data",
+  "檔案型的 WSL 來源由 Windows 直接掃描；資料庫型的工具（例如 OpenCode、Hermes）隔著 WSL 可能讀不到，要在 WSL 裡另外執行 agent。":
+    "File-based WSL sources are scanned from Windows. Database-backed tools such as OpenCode and Hermes may not be readable across WSL and need an agent running inside WSL.",
   "Token Monitor 儀表板": "Token Monitor dashboard",
   "每日歷史已關閉，沒有趨勢資料": "Daily history is off, so there are no trends",
   "浮動（永遠在最上層）；按一下改為標準": "Floating (always on top); click for standard",

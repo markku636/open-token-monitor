@@ -8,5 +8,5 @@ pub mod time;
 
 pub use limits::{LimitProvider, LimitWindow, LimitsSummary, ProviderStatus, WindowKind};
 pub use period::{Capabilities, CostMap, CountMap, Period, Project, Session};
-pub use record::{ClientStatus, DeviceRecord, Envelope, UsageSummary};
+pub use record::{ClientStatus, DeviceRecord, Envelope, UsageSummary, WslState, WslStatus};
 pub use time::{PeriodWindow, PeriodWindows};

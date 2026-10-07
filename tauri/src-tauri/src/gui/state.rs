@@ -73,6 +73,8 @@ pub struct SettingsView {
     pub build_channel: &'static str,
     pub app_version: &'static str,
     pub supported_clients: &'static [&'static str],
+    /// 這個平台能掃 WSL（Windows）；不能時設定頁不顯示 WSL 的開關與面板（上游只在 win32 顯示）。
+    pub wsl_supported: bool,
 }
 
 impl SettingsView {
@@ -90,6 +92,7 @@ impl SettingsView {
             build_channel: crate::baked::BUILD_CHANNEL,
             app_version: crate::baked::AGENT_VERSION,
             supported_clients: crate::settings::SUPPORTED_CLIENTS,
+            wsl_supported: cfg!(windows),
         }
     }
 }

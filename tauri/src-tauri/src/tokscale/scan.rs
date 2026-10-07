@@ -111,6 +111,20 @@ impl Scanner {
         workspaces: bool,
         cancel: &CancellationToken,
     ) -> AppResult<Value> {
+        self.scan_home(clients, period, workspaces, None, cancel)
+            .await
+    }
+
+    /// `home` = 以 `--home <路徑>` 讀另一個家目錄（WSL 的 `\\wsl$\<distro>\home\<user>`，
+    /// 上游 wslUsage.js）。tokscale 4.6 起明確給 `--home` 的掃描不會混進主機的根目錄。
+    pub async fn scan_home(
+        &self,
+        clients: &[String],
+        period: &ScanPeriod,
+        workspaces: bool,
+        home: Option<&str>,
+        cancel: &CancellationToken,
+    ) -> AppResult<Value> {
         let mut filter = self.filter_for(clients);
         // 每個被拒絕的 client 最多重試一次，保證會結束。
         for _ in 0..=filter.len() {
@@ -130,6 +144,10 @@ impl Scanner {
                 group_by.into(),
             ];
             args.extend(period.flags());
+            if let Some(home) = home {
+                args.push("--home".into());
+                args.push(home.to_string());
+            }
             match run_json(&self.bin, &args, &self.opts(), cancel).await {
                 Ok(v) => return Ok(v),
                 Err(AppError::TokscaleExit { stderr, .. })

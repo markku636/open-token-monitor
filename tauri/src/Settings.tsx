@@ -12,7 +12,10 @@ import {
   type SyncReport,
   type ThemeSetting,
   type WindowMode,
+  type WslState,
+  type WslStatus,
 } from "./api";
+import { shouldShowSqliteHelp, wslTone, type WslTone } from "./wsl";
 import type { LangSetting } from "./i18n";
 import { clientLabel } from "./clients";
 import { fmtTime } from "./format";
@@ -420,6 +423,73 @@ function CopilotLoginField() {
   );
 }
 
+const WSL_STATE_LABEL: Record<WslState, string> = {
+  active: t("偵測中"),
+  "no-data": t("未偵測到資料"),
+  "not-running": t("WSL 未執行"),
+  "not-installed": t("未安裝"),
+  disabled: t("已停用"),
+};
+
+const TONE_CLASS: Record<WslTone, string> = {
+  ok: "bg-success/15 text-success",
+  neutral: "bg-warning/15 text-warning",
+  muted: "bg-fg/10 text-fg/50",
+};
+
+function Tag({ tone, children }: { tone: WslTone; children: string }) {
+  return <span className={`shrink-0 rounded-xs px-1.5 py-px text-2xs ${TONE_CLASS[tone]}`}>{children}</span>;
+}
+
+// WSL 偵測面板（上游 renderWslPanel）：整體狀態，以及找到標記的工具各自有沒有掃到用量。
+function WslPanel({ status }: { status: WslStatus }) {
+  const withData = new Set(status.withData);
+  return (
+    <div className="mt-2 rounded-sm bg-inset px-2.5 py-2">
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="text-fg/70">{t("WSL 偵測")}</span>
+        <Tag tone={wslTone(status.state)}>{WSL_STATE_LABEL[status.state] ?? WSL_STATE_LABEL.disabled}</Tag>
+      </div>
+      {status.detected.length > 0 && (
+        <ul className="mt-1.5 space-y-1">
+          {status.detected.map((id) => (
+            <li key={id} className="flex items-center justify-between gap-3 text-xs">
+              <span className="truncate">{clientLabel(id)}</span>
+              <Tag tone={withData.has(id) ? "ok" : "neutral"}>{withData.has(id) ? t("有資料") : t("無資料")}</Tag>
+            </li>
+          ))}
+        </ul>
+      )}
+      {shouldShowSqliteHelp(status) && (
+        <p className="mt-1.5 text-2xs text-fg/50">
+          {t("檔案型的 WSL 來源由 Windows 直接掃描；資料庫型的工具（例如 OpenCode、Hermes）隔著 WSL 可能讀不到，要在 WSL 裡另外執行 agent。")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// 只在 Windows 顯示（上游 wslScanRow 在其他平台隱藏）。狀態來自本機最新的 record。
+function WslField({ s, status }: { s: SettingsView; status: WslStatus | null }) {
+  const updateSettings = useApp((x) => x.updateSettings);
+  return (
+    <div className="py-2.5">
+      <div className="flex items-start justify-between gap-6">
+        <div className="min-w-0">
+          <div className="text-sm">{t("掃描 WSL 裡的工具")}</div>
+          <div className="mt-0.5 text-xs text-fg/50">
+            {t("關閉後，Windows 不再隔著 {path} 掃描 WSL 裡的工具。WSL 裡另外有 agent 在上傳用量時請關閉，避免重複計算。", {
+              path: String.raw`\\wsl$`,
+            })}
+          </div>
+        </div>
+        <Toggle checked={s.wslScanEnabled} onChange={(v) => void updateSettings({ wslScanEnabled: v })} />
+      </div>
+      {status && <WslPanel status={status} />}
+    </div>
+  );
+}
+
 function toolNote(id: string, local: LocalStats | null, appStatus: AppStatus | null): string {
   const base = DETECTED_LABEL[local?.clientStatus[id] ?? ""] ?? "";
   const sync = appStatus?.selfSync?.[id];
@@ -620,6 +690,7 @@ export default function Settings() {
           <Field label={t("專案（資料夾）統計")} hint={t("關閉後不會上傳專案資料夾名稱")}>
             <Toggle checked={s.projectsEnabled} onChange={(v) => void updateSettings({ projectsEnabled: v })} />
           </Field>
+          {s.wslSupported && <WslField s={s} status={local?.wslStatus ?? null} />}
           <div className="py-2.5">
             <div className="text-sm">{t("追蹤的工具")}</div>
             <ul className="mt-2 space-y-1.5">

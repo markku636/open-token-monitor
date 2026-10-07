@@ -28,6 +28,7 @@ const RUNTIME_FIELDS: &[&str] = &[
     "watchDebounceMs",
     "historyEnabled",
     "sessionUsageArchiveEnabled",
+    "wslScanEnabled",
     "historyIntervalMs",
     "limitsEnabled",
     "limitProviders",

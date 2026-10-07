@@ -9,6 +9,7 @@ pub mod history;
 pub mod history_archive;
 pub mod js;
 pub mod keys;
+pub mod merge;
 pub mod projects;
 pub mod session_meta;
 

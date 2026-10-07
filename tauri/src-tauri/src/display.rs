@@ -11,7 +11,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::hub::stream::{HubDevice, HubStats, SlimPeriod};
-use crate::wire::{ClientStatus, CostMap, CountMap, DeviceRecord, Period, PeriodWindows};
+use crate::wire::{
+    ClientStatus, CostMap, CountMap, DeviceRecord, Period, PeriodWindows, WslStatus,
+};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +77,8 @@ pub struct LocalStats {
     pub period_windows: PeriodWindows,
     pub tracked_clients: Vec<String>,
     pub client_status: IndexMap<String, ClientStatus>,
+    /// WSL 掃描的狀態（設定頁的 WSL 面板）；沒有 WSL 的平台是 `None`。
+    pub wsl_status: Option<WslStatus>,
     /// 近 30 天的每日用量（widget 的長條圖）；還沒掃過 history 或 history 關閉時為 `None`。
     pub history: Option<HistoryPreview>,
 }
@@ -171,6 +175,7 @@ impl From<&DeviceRecord> for LocalStats {
             period_windows: r.period_windows.clone(),
             tracked_clients: r.tracked_clients.clone(),
             client_status: r.client_status.clone(),
+            wsl_status: r.wsl_status.clone(),
             history: r
                 .history
                 .as_deref()

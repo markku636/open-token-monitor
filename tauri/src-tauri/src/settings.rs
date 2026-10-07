@@ -57,6 +57,24 @@ pub const EXPORT_INTERVAL_OPTIONS: &[u64] =
 /// 上游 collector.js 的 watchDebounceMs 預設值。
 pub const DEFAULT_WATCH_DEBOUNCE_MS: u64 = 1_500;
 
+/// `wslScanEnabled` 的預設值（上游 main.js 與 agent.js 同名）；tm-agent 也以它覆寫設定檔。
+pub const WSL_SCAN_ENV: &str = "TOKEN_MONITOR_WSL_SCAN";
+
+/// 上游 `parseBoolean`：空字串用預設值，`0` / `false` / `no` / `off` 是 false，其他都是 true。
+pub fn parse_bool(value: &str, default: bool) -> bool {
+    if value.is_empty() {
+        return default;
+    }
+    !matches!(
+        value.trim().to_lowercase().as_str(),
+        "0" | "false" | "no" | "off"
+    )
+}
+
+fn env_bool(name: &str, default: bool) -> bool {
+    std::env::var(name).map_or(default, |v| parse_bool(&v, default))
+}
+
 const MAX_CUSTOM_SCAN_PATHS_PER_CLIENT: usize = 16;
 const MAX_CUSTOM_SCAN_PATH_LENGTH: usize = 4096;
 
@@ -97,6 +115,10 @@ pub struct Settings {
     pub watch_debounce_ms: u64,
     /// client 刪掉舊紀錄後仍保留那些 session 的用量（上游 `sessionUsageArchiveEnabled`，預設開）。
     pub session_usage_archive_enabled: bool,
+    /// 隔著 `\\wsl$` 掃描執行中 WSL distro 裡的工具（上游 `wslScanEnabled`；只在 Windows 有作用）。
+    /// 預設開，`TOKEN_MONITOR_WSL_SCAN` 決定還沒有設定檔時的預設值（上游 main.js）。已經在 WSL
+    /// 裡跑 agent 的人要關掉，否則同一份用量會算兩次。
+    pub wsl_scan_enabled: bool,
     /// 上傳每天的用量歷史（hub 的熱力圖與日表）。上游 `historyEnabled`。
     pub history_enabled: bool,
     /// history 的 graph 掃描間隔；換日與手動重掃時不等間隔。
@@ -174,6 +196,7 @@ impl Default for Settings {
             watch_enabled: true,
             watch_debounce_ms: DEFAULT_WATCH_DEBOUNCE_MS,
             session_usage_archive_enabled: true,
+            wsl_scan_enabled: env_bool(WSL_SCAN_ENV, true),
             history_enabled: true,
             history_interval_ms: DEFAULT_HISTORY_INTERVAL_MS,
             limits_enabled: true,

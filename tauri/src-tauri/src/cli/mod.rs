@@ -25,7 +25,7 @@ use crate::hub::payload::{serialize_sync_payload, PayloadOptions};
 use crate::hub::{HubClient, HubError};
 use crate::identity;
 use crate::limits::runtime::{LimitsConfig, LimitsRuntime};
-use crate::settings::{mask_secret, resolve_hub, HubResolution, Settings};
+use crate::settings::{mask_secret, parse_bool, resolve_hub, HubResolution, Settings};
 use crate::tokscale::{ScanPeriod, Scanner};
 
 #[derive(Parser, Debug)]
@@ -94,6 +94,9 @@ pub struct Cli {
     /// 專案（資料夾）統計；`0` / `false` / `no` / `off` 關閉（與上游 agent 相同）
     #[arg(long, global = true, env = "TOKEN_MONITOR_PROJECTS_ENABLED")]
     projects: Option<String>,
+    /// 掃描執行中 WSL distro 裡的工具（只在 Windows）；`0` / `false` / `no` / `off` 關閉（與上游 agent 相同）
+    #[arg(long, global = true, env = crate::settings::WSL_SCAN_ENV)]
+    wsl_scan: Option<String>,
     /// 上傳間隔（毫秒；0 = 即時，600000 / 1200000 / 1800000）
     #[arg(long, global = true, env = "TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS")]
     sync_upload_interval_ms: Option<u64>,
@@ -251,6 +254,8 @@ const LEGACY_FLAGS: &[(&str, &str)] = &[
     ("--historyEnabled", "--history"),
     ("--historyIntervalMs", "--history-interval-ms"),
     ("--projectsEnabled", "--projects"),
+    ("--wslScan", "--wsl-scan"),
+    ("--wslScanEnabled", "--wsl-scan"),
     ("--allTimeSince", "--since"),
     ("--dryRun", "--dry-run"),
 ];
@@ -371,15 +376,6 @@ struct Context {
     hub: HubResolution,
 }
 
-/// 上游 `parseBoolean`：空字串用預設值，`0` / `false` / `no` / `off` 是 false，其他都是 true。
-fn parse_bool(value: &str, default: bool) -> bool {
-    let v = value.trim().to_lowercase();
-    if value.is_empty() {
-        return default;
-    }
-    !matches!(v.as_str(), "0" | "false" | "no" | "off")
-}
-
 fn load_context(cli: &Cli) -> AppResult<Context> {
     if let Some(dir) = &cli.config_dir {
         std::env::set_var(crate::store::CONFIG_DIR_ENV, dir);
@@ -402,6 +398,9 @@ fn load_context(cli: &Cli) -> AppResult<Context> {
     }
     if let Some(v) = &cli.projects {
         settings.projects_enabled = parse_bool(v, true);
+    }
+    if let Some(v) = &cli.wsl_scan {
+        settings.wsl_scan_enabled = parse_bool(v, true);
     }
     if let Some(ms) = cli.sync_upload_interval_ms {
         settings.sync_upload_interval_ms = ms;
@@ -1070,6 +1069,22 @@ async fn cmd_doctor(cli: &Cli, ctx: Context) -> AppResult<()> {
             }
         );
     }
+    if cfg!(windows) {
+        use crate::collector::wsl::{probe_wsl_state, wsl_usage_homes, SystemWsl, WslProbe};
+        let state = if !ctx.settings.wsl_scan_enabled {
+            "scan disabled (wslScanEnabled)".to_string()
+        } else {
+            match probe_wsl_state(&SystemWsl) {
+                WslProbe::NotInstalled => "not installed".to_string(),
+                WslProbe::NotRunning => "installed, no running distro (not scanned)".to_string(),
+                WslProbe::Ok => format!(
+                    "{} home(s) with tool data in running distros",
+                    wsl_usage_homes(&SystemWsl).len()
+                ),
+            }
+        };
+        println!("[info] wsl         {state}");
+    }
     if ctx.hub.url.is_some() {
         match hub_client(&ctx.hub) {
             Ok(client) => match client.health().await {
@@ -1249,5 +1264,20 @@ mod tests {
         assert_eq!(args(&["tm-agent"]), ["tm-agent", "run"]);
         assert_eq!(args(&["tm-agent", "doctor"]), ["tm-agent", "doctor"]);
         assert_eq!(args(&["tm-agent", "--help"]), ["tm-agent", "--help"]);
+    }
+
+    #[test]
+    fn wsl_scan_flag_accepts_the_upstream_spellings() {
+        assert_eq!(
+            args(&["tm-agent", "--once", "--wslScan=0"]),
+            ["tm-agent", "once", "--wsl-scan=0"]
+        );
+        assert_eq!(
+            args(&["tm-agent", "--wslScanEnabled", "false"]),
+            ["tm-agent", "run", "--wsl-scan", "false"]
+        );
+        let cli = Cli::try_parse_from(args(&["tm-agent", "--once", "--wslScan=off"])).unwrap();
+        assert_eq!(cli.wsl_scan.as_deref(), Some("off"));
+        assert!(!parse_bool(cli.wsl_scan.as_deref().unwrap(), true));
     }
 }
