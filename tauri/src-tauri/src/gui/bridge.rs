@@ -89,15 +89,24 @@ pub(super) fn update_status(app: &AppHandle, f: impl FnOnce(&mut AppStatus)) {
 
 fn on_core_event(app: &AppHandle, event: CoreEvent) {
     match event {
-        CoreEvent::TickStarted { .. } => update_status(app, |s| s.collecting = true),
-        CoreEvent::TickFinished { .. } => update_status(app, |s| {
-            s.collecting = false;
-            s.last_collect_error = None;
-        }),
-        CoreEvent::TickFailed { error, .. } => update_status(app, |s| {
-            s.collecting = false;
-            s.last_collect_error = Some(error.message);
-        }),
+        CoreEvent::TickStarted { reason } => {
+            super::tray::on_tick_started(&reason);
+            update_status(app, |s| s.collecting = true)
+        }
+        CoreEvent::TickFinished { reason, .. } => {
+            super::tray::on_tick_finished(app, &reason, None);
+            update_status(app, |s| {
+                s.collecting = false;
+                s.last_collect_error = None;
+            })
+        }
+        CoreEvent::TickFailed { reason, error } => {
+            super::tray::on_tick_finished(app, &reason, Some(&error.message));
+            update_status(app, |s| {
+                s.collecting = false;
+                s.last_collect_error = Some(error.message);
+            })
+        }
         CoreEvent::RecordPublished { record, .. } => {
             let stats = LocalStats::from(&*record);
             let updated_at = stats.updated_at.clone();
@@ -162,6 +171,8 @@ pub async fn restart_runtime(app: &AppHandle) {
     if let Some(old) = slot.take() {
         old.stop().await;
     }
+    // 舊 runtime 停下時那次 tray 重新掃描可能不會回報結束；新 runtime 啟動時本來就會掃一次。
+    super::tray::reset_rescan();
     let settings = state.settings();
     let hub = resolve_hub(&settings, None, None);
 

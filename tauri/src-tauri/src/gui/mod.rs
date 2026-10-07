@@ -12,6 +12,7 @@ mod currency;
 mod dock;
 mod export;
 mod i18n;
+mod notify;
 mod service_status;
 mod shortcut;
 mod state;
@@ -95,9 +96,12 @@ pub fn run() {
         .manage(app_state)
         .setup(|app| {
             let handle = app.handle().clone();
-            tray::build(&handle)?;
             let settings = handle.state::<AppState>().settings();
-            window::apply_mode(&handle, settings.window_mode);
+            // `showTrayIcon` 關閉時不建 tray；之後在設定頁打開才建（tray::sync_visibility）。
+            if settings.show_tray_icon {
+                tray::build(&handle)?;
+            }
+            window::apply_mode(&handle, &settings);
             taskbar::configure(&handle, taskbar::enabled_for(&settings));
             chrome::apply(&handle, &settings);
             shortcut::apply(&handle, &settings.window_toggle_shortcut);
@@ -119,7 +123,7 @@ pub fn run() {
                         tracing::warn!(
                             "frontend did not report ready within 4s; showing window anyway"
                         );
-                        let _ = w.show();
+                        window::reveal_main(&h);
                     }
                 }
             });
@@ -135,6 +139,9 @@ pub fn run() {
             commands::window_show_ready,
             commands::window_toggle,
             commands::window_hide,
+            commands::window_minimize,
+            commands::window_toggle_maximize,
+            commands::window_close,
             commands::window_open_settings,
             commands::window_open_dashboard,
             commands::app_diagnostics,
@@ -179,14 +186,19 @@ pub fn run() {
                 return;
             }
             match event {
-                // widget 的關閉 = 收到 tray；要真的結束走 tray 選單的「結束」。
+                // widget 的關閉 = 收到 tray；要真的結束走 tray 選單的「結束」。沒有系統匣圖示時
+                // 藏起來就叫不回來，改成結束（window::close_main，上游 mainWindowCloseAction）。
                 WindowEvent::CloseRequested { api, .. } if !QUITTING.load(Ordering::SeqCst) => {
                     api.prevent_close();
-                    let _ = window.hide();
-                    taskbar::wake();
+                    window::close_main(window.app_handle());
                 }
                 // 拖到工作列上（或離開）時重新判斷要不要保持在工作列上方。
-                WindowEvent::Moved(_) | WindowEvent::Resized(_) => taskbar::wake(),
+                WindowEvent::Moved(_) => taskbar::wake(),
+                // 最大化與還原也是 Resized：順便把狀態寫回 `windowMaximized`。
+                WindowEvent::Resized(_) => {
+                    taskbar::wake();
+                    window::on_resized(window.app_handle());
+                }
                 // 失去焦點多半是別的視窗（常常就是工作列）取得前景。
                 WindowEvent::Focused(false) => {
                     taskbar::nudge();

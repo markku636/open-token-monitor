@@ -1,11 +1,15 @@
 //! 視窗行為：widget 模式、顯示 / 隱藏、設定視窗。
 //!
 //! 模式（對應上游 src/electron/windowBehavior.js）：
-//! - `floating`：永遠在最上層、不出現在工作列、可拖曳縮放。
-//! - `normal`：一般視窗，出現在工作列。
+//! - `floating`：永遠在最上層、可拖曳縮放。
+//! - `normal`：一般視窗。
 //! - `desktop`：貼在最底層（桌面上方），不可縮放；Win+D 仍會把它藏起來。
 //! - `tray`：平常隱藏，按 tray 圖示（或快捷鍵）時在圖示旁彈出，失去焦點就收起來
 //!   （上游 main.js `showPopover` / `togglePopover`，位置見 `popover_position`）。
+//!
+//! 工作列按鈕、最小化／最大化與關閉的規則在 `crate::window_policy`（上游 trayModeSettings.js、
+//! windowState.js）：除了系統匣模式與 `hideAppIcon`，工作列都有 widget 的按鈕；最大化狀態存在
+//! 設定 `windowMaximized`，顯示視窗時照它還原。
 //!
 //! Tauri（tao）的 always-on-top 是 `HWND_TOPMOST`，不像 Electron 的 floating 等級會自己降到
 //! 工作列後面；但工作列取得啟用時仍會蓋上來，`keepAboveTaskbar` 開啟時由 taskbar.rs 重新置頂。
@@ -19,7 +23,9 @@ use tauri::{
     WebviewWindowBuilder,
 };
 
-use crate::settings::WindowMode;
+use super::state::AppState;
+use crate::settings::{Settings, WindowMode};
+use crate::window_policy::{self as policy, CloseAction};
 
 pub const MAIN: &str = "main";
 pub const SETTINGS: &str = "settings";
@@ -29,38 +35,144 @@ pub fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(MAIN)
 }
 
-pub fn apply_mode(app: &AppHandle, mode: WindowMode) {
+pub fn apply_mode(app: &AppHandle, settings: &Settings) {
     let Some(w) = main_window(app) else { return };
+    let mode = settings.window_mode;
     let result = match mode {
         WindowMode::Floating => w
             .set_always_on_bottom(false)
             .and_then(|_| w.set_always_on_top(true))
-            .and_then(|_| w.set_skip_taskbar(true))
             .and_then(|_| w.set_resizable(true)),
         WindowMode::Normal => w
             .set_always_on_top(false)
             .and_then(|_| w.set_always_on_bottom(false))
-            .and_then(|_| w.set_skip_taskbar(false))
             .and_then(|_| w.set_resizable(true)),
         WindowMode::Desktop => w
             .set_always_on_top(false)
             .and_then(|_| w.set_always_on_bottom(true))
-            .and_then(|_| w.set_skip_taskbar(true))
             .and_then(|_| w.set_resizable(false)),
-        WindowMode::Tray => w
-            .set_always_on_bottom(false)
-            .and_then(|_| w.set_always_on_top(true))
-            .and_then(|_| w.set_skip_taskbar(true))
-            .and_then(|_| w.set_resizable(true))
-            .and_then(|_| w.hide()),
+        WindowMode::Tray => {
+            // 上游 enterTrayMode `suspendWindowMaximized`：popover 不能是最大化的，但
+            // `windowMaximized` 不動（此時已是系統匣模式，on_resized 不會記），離開時照它還原。
+            if w.is_maximized().unwrap_or(false) {
+                let _ = w.unmaximize();
+            }
+            w.set_always_on_bottom(false)
+                .and_then(|_| w.set_always_on_top(true))
+                .and_then(|_| w.set_resizable(true))
+                .and_then(|_| w.hide())
+        }
     };
     if let Err(e) = result {
         tracing::warn!(error = %e, ?mode, "failed to apply window mode");
     }
+    // 收合的泡泡自己管這兩項（bubble.rs）。
+    if !super::bubble::current(app).collapsed {
+        let _ = w.set_maximizable(policy::maximizable(settings));
+        let _ = w.set_minimizable(true);
+    }
+    sync_taskbar(app);
+}
+
+fn settings(app: &AppHandle) -> Settings {
+    app.state::<AppState>().settings()
 }
 
 fn tray_mode(app: &AppHandle) -> bool {
-    app.state::<super::state::AppState>().settings().window_mode == WindowMode::Tray
+    settings(app).window_mode == WindowMode::Tray
+}
+
+/// 依設定（重新）套用工作列按鈕：上游 `skipTaskbarForSettings`，收合的泡泡一律不顯示。
+///
+/// 每次顯示視窗後都要再套一次：tao 的 `set_skip_taskbar` 是 `ITaskbarList::DeleteTab` /
+/// `AddTab`，視窗藏起來再顯示時 Explorer 會自己決定要不要放按鈕。藏著的視窗不 `AddTab`
+/// （會在工作列留下一個點了沒反應的按鈕），等顯示時再套。
+pub fn sync_taskbar(app: &AppHandle) {
+    let Some(w) = main_window(app) else { return };
+    let skip = policy::skip_taskbar(&settings(app)) || super::bubble::current(app).collapsed;
+    if !skip && !w.is_visible().unwrap_or(false) {
+        return;
+    }
+    if let Err(e) = w.set_skip_taskbar(skip) {
+        tracing::warn!(error = %e, skip, "failed to update the taskbar button");
+    }
+}
+
+/// 上一次看到的最大化狀態；只有狀態真的改變時才寫回設定（上游的 maximize / unmaximize 事件）。
+static LAST_MAXIMIZED: AtomicBool = AtomicBool::new(false);
+
+/// 主視窗大小改變（含最大化、還原）：把最大化狀態寫回 `windowMaximized`。
+/// 系統匣模式與收合的泡泡不記（上游 `shouldTrackWindowMaximized`）。
+pub fn on_resized(app: &AppHandle) {
+    let Some(w) = main_window(app) else { return };
+    // 最小化時 tao 會把最大化旗標清掉（WM_SIZE 的 SIZE_MINIMIZED），那不是使用者還原了視窗。
+    if w.is_minimized().unwrap_or(false) {
+        return;
+    }
+    let maximized = w.is_maximized().unwrap_or(false);
+    if LAST_MAXIMIZED.swap(maximized, Ordering::SeqCst) == maximized {
+        return;
+    }
+    if policy::track_maximized(&settings(app), super::bubble::current(app).collapsed) {
+        super::commands::persist_window_maximized(app, maximized);
+    }
+}
+
+/// 顯示 widget 時照 `windowMaximized` 還原成最大化（上游 `restoreWindowMaximized`）。
+pub fn restore_maximized(app: &AppHandle, w: &WebviewWindow) {
+    if policy::restore_maximized(&settings(app), super::bubble::current(app).collapsed)
+        && !w.is_maximized().unwrap_or(true)
+    {
+        let _ = w.maximize();
+    }
+}
+
+/// 啟動時第一次顯示（前端首次繪製、或 4 秒保險絲）。系統匣模式不顯示，等使用者按 tray 圖示。
+pub fn reveal_main(app: &AppHandle) {
+    if tray_mode(app) {
+        return;
+    }
+    if let Some(w) = main_window(app) {
+        let _ = w.show();
+        restore_maximized(app, &w);
+        sync_taskbar(app);
+    }
+}
+
+/// 標題列的最小化鈕（上游 `window:minimize`）：系統匣模式收回 popover，其他模式最小化。
+pub fn minimize_main(app: &AppHandle) {
+    let Some(w) = main_window(app) else { return };
+    if policy::minimize_hides(&settings(app)) {
+        let _ = w.hide();
+    } else {
+        let _ = w.minimize();
+    }
+    super::taskbar::wake();
+}
+
+/// 標題列的最大化鈕：最大化 ↔ 還原；桌面與系統匣模式不能最大化。雙擊標題列走 Tauri 內建的
+/// `internal_toggle_maximize`，結果一樣由 `on_resized` 記下來。
+pub fn toggle_maximize_main(app: &AppHandle) {
+    let Some(w) = main_window(app) else { return };
+    if w.is_maximized().unwrap_or(false) {
+        let _ = w.unmaximize();
+    } else if policy::maximizable(&settings(app)) && !super::bubble::current(app).collapsed {
+        let _ = w.maximize();
+    }
+}
+
+/// 關閉 widget（× 與 Alt+F4，上游 `mainWindowCloseAction`）：有系統匣圖示就藏起來，
+/// 沒有就結束程式——否則藏起來的視窗再也叫不回來。
+pub fn close_main(app: &AppHandle) {
+    match policy::close_action(&settings(app)) {
+        CloseAction::Hide => {
+            if let Some(w) = main_window(app) {
+                let _ = w.hide();
+            }
+            super::taskbar::wake();
+        }
+        CloseAction::Quit => super::quit(app),
+    }
 }
 
 /// 最近一次點 tray 圖示時圖示的位置與大小（實體像素）；popover 以它為錨點。
@@ -119,6 +231,7 @@ fn show_popover(app: &AppHandle, w: &WebviewWindow) {
     SUPPRESS_BLUR_HIDE.store(true, Ordering::SeqCst);
     let _ = w.show();
     let _ = w.set_focus();
+    sync_taskbar(app);
     tauri::async_runtime::spawn(async {
         tokio::time::sleep(Duration::from_millis(250)).await;
         SUPPRESS_BLUR_HIDE.store(false, Ordering::SeqCst);
@@ -149,6 +262,9 @@ pub fn show_main(app: &AppHandle) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+        // 上游 focusExistingWindow：顯示後照 `windowMaximized` 還原。
+        restore_maximized(app, &w);
+        sync_taskbar(app);
     }
     super::taskbar::wake();
 }

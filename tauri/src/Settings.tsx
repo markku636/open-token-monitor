@@ -7,6 +7,7 @@ import {
   onCopilotLogin,
   type AppStatus,
   type Diagnostics,
+  type EdgeDockMode,
   type LocalStats,
   type SettingsView,
   type SyncReport,
@@ -26,6 +27,7 @@ import { ExportSection } from "./SettingsExport";
 import { notesOf, ReleaseNotes } from "./UpdatePill";
 import { formatShortcut, shortcutFromEvent } from "./shortcut";
 import { normalizeOwnerEmail } from "./ownerEmail";
+import { trayOptions } from "./windowControls";
 
 const SOURCE_LABEL: Record<string, string> = {
   baked: t("內建"),
@@ -433,6 +435,7 @@ export default function Settings() {
     const next = on ? [...s.trackedClients, id] : s.trackedClients.filter((c) => c !== id);
     void updateSettings({ trackedClients: s.supportedClients.filter((c) => next.includes(c)) });
   };
+  const tray = trayOptions(s);
   return (
     <div className="scroll-thin h-full overflow-y-auto">
       <div className="mx-auto max-w-[620px] space-y-3 p-4">
@@ -455,11 +458,22 @@ export default function Settings() {
                 { value: "floating", label: t("浮動") },
                 { value: "normal", label: t("標準") },
                 { value: "desktop", label: t("桌面") },
-                { value: "tray", label: t("系統匣") },
+                ...(tray.trayMode ? [{ value: "tray" as const, label: t("系統匣") }] : []),
               ]}
               onChange={(v) => void updateSettings({ windowMode: v })}
             />
           </Field>
+          <Field
+            label={t("顯示系統匣圖示")}
+            hint={s.showTrayIcon ? undefined : t("關閉時不能用系統匣模式，按 widget 的 × 會結束程式")}
+          >
+            <Toggle checked={s.showTrayIcon} onChange={(v) => void updateSettings({ showTrayIcon: v })} />
+          </Field>
+          {tray.hideAppIcon && (
+            <Field label={t("隱藏工作列按鈕")} hint={t("widget 仍留在桌面；用系統匣圖示或快捷鍵叫到最前面")}>
+              <Toggle checked={s.hideAppIcon} onChange={(v) => void updateSettings({ hideAppIcon: v })} />
+            </Field>
+          )}
           {s.windowMode === "floating" && (
             <Field
               label={t("保持在工作列上方（實驗性）")}
@@ -479,6 +493,18 @@ export default function Settings() {
           <Field label={t("邊緣額度條")} hint={t("螢幕邊緣的細條，游標碰到就展開各工具的額度；點圓環開啟額度分頁")}>
             <Toggle checked={s.edgeDockEnabled} onChange={(v) => void updateSettings({ edgeDockEnabled: v })} />
           </Field>
+          {s.edgeDockEnabled && (
+            <Field label={t("額度條顯示方式")} hint={t("永遠顯示時一直展開，不必把游標移到螢幕邊緣")}>
+              <Segmented<EdgeDockMode>
+                value={s.edgeDockMode}
+                options={[
+                  { value: "autoHide", label: t("自動隱藏") },
+                  { value: "always", label: t("永遠顯示") },
+                ]}
+                onChange={(v) => void updateSettings({ edgeDockMode: v })}
+              />
+            </Field>
+          )}
           {s.edgeDockEnabled && (
             <Field label={t("額度條位置")} hint={t("高度 {n}%", { n: Math.round(s.edgeDockOffset * 100) })}>
               <div className="flex items-center gap-2">
@@ -523,17 +549,19 @@ export default function Settings() {
               onChange={(v) => void updateSettings({ language: v })}
             />
           </Field>
-          <Field label={t("系統匣圖示")} hint={s.trayContent === "barsSessions" ? t("上面 Claude Code、下面 Codex 的 5 小時已用比例") : t("額度長條：最接近上限的工具，上面 5 小時、下面每週的已用比例")}>
-            <Segmented<"icon" | "bars" | "barsSessions">
-              value={s.trayContent}
-              options={[
-                { value: "icon", label: t("圖示") },
-                { value: "bars", label: t("額度長條") },
-                { value: "barsSessions", label: t("各工具 5 小時") },
-              ]}
-              onChange={(v) => void updateSettings({ trayContent: v })}
-            />
-          </Field>
+          {tray.trayContent && (
+            <Field label={t("系統匣圖示")} hint={s.trayContent === "barsSessions" ? t("上面 Claude Code、下面 Codex 的 5 小時已用比例") : t("額度長條：最接近上限的工具，上面 5 小時、下面每週的已用比例")}>
+              <Segmented<"icon" | "bars" | "barsSessions">
+                value={s.trayContent}
+                options={[
+                  { value: "icon", label: t("圖示") },
+                  { value: "bars", label: t("額度長條") },
+                  { value: "barsSessions", label: t("各工具 5 小時") },
+                ]}
+                onChange={(v) => void updateSettings({ trayContent: v })}
+              />
+            </Field>
+          )}
           <Field label={t("玻璃效果")} hint={t("widget 背後的 Windows acrylic 模糊；降低不透明度才看得清楚")}>
             <Toggle checked={s.systemGlass} onChange={(v) => void updateSettings({ systemGlass: v })} />
           </Field>

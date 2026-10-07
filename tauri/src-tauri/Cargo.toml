@@ -82,9 +82,10 @@ notify = "8"
 keyring = { version = "3", features = ["windows-native"] }
 # osName / osVersion：讀 HKLM\...\Windows NT\CurrentVersion（對齊上游 src/shared/osVersion.js）。
 winreg = "0.55"
-# 工作列上方重新置頂（gui/taskbar.rs）與圓角（gui/chrome.rs）：SetWindowPos、前景事件 hook、
-# DwmSetWindowAttribute。與 tao / tauri 同一個版本與 feature 集合，沒有多編譯任何東西。
-windows = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
+# 工作列上方重新置頂（gui/taskbar.rs）、圓角（gui/chrome.rs）與 tray 圖示的氣球通知（gui/notify.rs）：
+# SetWindowPos、前景事件 hook、DwmSetWindowAttribute、Shell_NotifyIconW。與 tao / tauri 同一個版本，
+# feature 也都是 tao 已經開的，沒有多編譯任何東西。
+windows = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_Accessibility", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }

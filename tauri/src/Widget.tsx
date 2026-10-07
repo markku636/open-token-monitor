@@ -1,7 +1,7 @@
 // 桌面小工具本體：本機或全公司的今日／本月／全部 token 與等值成本，依工具、模型、專案或 session 拆分。
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LayoutDashboard, Monitor, Pin, PinOff, RefreshCw, Settings as SettingsIcon, X } from "lucide-react";
+import { Copy, LayoutDashboard, Minus, Monitor, Pin, PinOff, RefreshCw, Settings as SettingsIcon, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, isTauri, type AppStatus, type PeriodDetail, type PeriodName, type PeriodTotals, type RangeName, type WindowMode } from "./api";
 import { BreakdownList } from "./Breakdown";
@@ -21,6 +21,7 @@ import { isRange, MONTH_MODES, monthModeLabel, shortDate, slotOf, weekStartDay }
 import { useFetched } from "./useFetched";
 import { AverageRate, LiveRate } from "./Rate";
 import { UpdatePill } from "./UpdatePill";
+import { headerControls } from "./windowControls";
 
 const TABS: { value: Tab; label: string }[] = [
   { value: "local", label: t("本機") },
@@ -71,14 +72,35 @@ function PinButton() {
   );
 }
 
+/** 最小化、最大化／還原與 ×（上游 minButton / closeButton；最大化另外也能雙擊標題列）。 */
+function WindowButtons() {
+  const settings = useApp((s) => s.settings);
+  const controls = headerControls(settings);
+  return (
+    <div className="flex items-center">
+      <IconButton title={t("最小化")} onClick={() => void api.windowMinimize()}>
+        <Minus size={14} />
+      </IconButton>
+      {controls.maximize && (
+        <IconButton title={controls.maximized ? t("還原") : t("最大化")} onClick={() => void api.windowToggleMaximize()}>
+          {controls.maximized ? <Copy size={12} /> : <Square size={11} />}
+        </IconButton>
+      )}
+      <IconButton title={controls.closeQuits ? t("結束 Token Monitor") : t("收到系統匣")} onClick={() => void api.windowClose()}>
+        <X size={14} />
+      </IconButton>
+    </div>
+  );
+}
+
 function Header() {
   const status = useApp((s) => s.status);
   const desktop = useApp((s) => s.settings?.windowMode === "desktop");
   const drag = desktop ? {} : { "data-tauri-drag-region": true };
   return (
-    <header className="flex items-center gap-2 px-3 pb-1 pt-2.5" {...drag}>
+    <header className="flex items-center gap-1 px-3 pb-1 pt-2.5" {...drag}>
       <StatusDot status={status} />
-      <span className="flex-1 text-xs font-medium text-fg/80" {...drag}>
+      <span className="mx-1 min-w-0 flex-1 truncate text-xs font-medium text-fg/80" {...drag}>
         Token Monitor
       </span>
       <IconButton title={t("立即重新掃描")} onClick={() => void api.usageRescan()} disabled={status?.collecting}>
@@ -91,9 +113,7 @@ function Header() {
       <IconButton title={t("設定")} onClick={() => void api.windowOpenSettings()}>
         <SettingsIcon size={13} />
       </IconButton>
-      <IconButton title={t("收到系統匣")} onClick={() => void api.windowHide()}>
-        <X size={14} />
-      </IconButton>
+      <WindowButtons />
     </header>
   );
 }

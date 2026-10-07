@@ -3,10 +3,17 @@
 //! 圖示有兩種（設定 `trayContent`）：`icon` 是 app 圖示；`bars` 把最接近上限的工具畫成兩條額度長條
 //! （tray_bars.rs，上游的 bars 模式）。長條的墨色跟著 Windows 工作列的淺色／深色，每分鐘檢查一次。
 //! 圖示只在內容真的變了才換，避免每幾秒一次的用量更新都重畫。
+//!
+//! `showTrayIcon` 關閉時不建 tray；建過之後關掉只是隱藏（`set_visible`），選單與下面這些
+//! `OnceLock` 只建一次。
+//!
+//! 從選單重新掃描時（上游 main.js `refreshFromTray`）：項目變成「正在重新掃描…」並停用，
+//! 那次 manual tick 結束才恢復；失敗時跳出系統通知（notify.rs，上游 `showTrayRefreshError`）。
 
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+use serde_json::Value;
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -16,7 +23,8 @@ use super::i18n::tr;
 use super::state::AppState;
 use super::tray_bars::{pick_sessions, pick_worst, render_bars, BarsSelection};
 use super::{updater, window};
-use crate::settings::WindowMode;
+use crate::device::runtime::TickReason;
+use crate::settings::{Settings, WindowMode};
 use crate::update::UpdateState;
 use crate::wire::WindowKind;
 
@@ -26,6 +34,19 @@ pub const EVT_OPEN_TAB: &str = "open-tab";
 
 /// 「檢查更新」項目：下載好新版後改成「重新啟動以更新（vX）」。
 static UPDATE_ITEM: OnceLock<MenuItem<Wry>> = OnceLock::new();
+/// 「立即重新掃描」：tray 發起的掃描進行中時改字並停用（`RESCAN`）。
+static RESCAN_ITEM: OnceLock<MenuItem<Wry>> = OnceLock::new();
+
+/// 邊緣額度條子選單（上游 tray.js 的 Edge Dock 快速控制）：顯示勾選、顯示方式、左右。
+/// 額度條關著時也能先選好方式與邊，打開時就照使用者要的樣子出現（上游同樣）。
+struct DockItems {
+    show: CheckMenuItem<Wry>,
+    modes: Vec<(CheckMenuItem<Wry>, &'static str)>,
+    sides: Vec<(CheckMenuItem<Wry>, &'static str)>,
+}
+static DOCK_ITEMS: OnceLock<DockItems> = OnceLock::new();
+const DOCK_MODES: &[(&str, &str)] = &[("autoHide", "自動隱藏"), ("always", "永遠顯示")];
+const DOCK_SIDES: &[(&str, &str)] = &[("left", "左側"), ("right", "右側")];
 
 /// 有文字的選單項目與它們的繁中原文（換語言時重設文字）。
 enum Labeled {
@@ -91,17 +112,161 @@ pub fn retitle(app: &AppHandle) {
         };
     }
     set_update_item(&updater::current_state(app));
+    set_rescan_item();
     refresh(app);
 }
 
 /// 設定改變後同步勾選狀態（設定頁與 tray 兩邊都能改）。
-pub fn sync_checks(settings: &crate::settings::Settings) {
+pub fn sync_checks(settings: &Settings) {
     for (item, mode) in MODE_ITEMS.get().into_iter().flatten() {
         let _ = item.set_checked(*mode == settings.window_mode);
     }
     for (item, id) in CONTENT_ITEMS.get().into_iter().flatten() {
         let _ = item.set_checked(*id == settings.tray_content);
     }
+    if let Some(dock) = DOCK_ITEMS.get() {
+        let _ = dock.show.set_checked(settings.edge_dock_enabled);
+        for (item, id) in &dock.modes {
+            let _ = item.set_checked(*id == settings.edge_dock_mode);
+        }
+        for (item, id) in &dock.sides {
+            let _ = item.set_checked(*id == settings.edge_dock_side);
+        }
+    }
+}
+
+/// 設定 `showTrayIcon` 改變：第一次打開才建 tray，之後只切換顯示（上游 ensureTray / destroyTray）。
+pub fn sync_visibility(app: &AppHandle, settings: &Settings) {
+    match app.tray_by_id(TRAY_ID) {
+        Some(tray) => {
+            if let Err(e) = tray.set_visible(settings.show_tray_icon) {
+                tracing::warn!(error = %e, "failed to change tray icon visibility");
+            }
+        }
+        None if settings.show_tray_icon => {
+            if let Err(e) = build(app) {
+                tracing::warn!(error = %e, "failed to create the tray icon");
+            }
+        }
+        None => {}
+    }
+}
+
+/// tray 發起的重新掃描走到哪（上游 `trayRefreshInFlight`）。只看 manual tick：請求後的第一個
+/// manual tick 開始才算數，那次結束（成功或失敗）才回到閒置——請求當下正在跑的那次不算。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum RescanState {
+    #[default]
+    Idle,
+    Requested,
+    Running,
+}
+
+impl RescanState {
+    fn manual(reason: &str) -> bool {
+        reason == TickReason::Manual.as_str()
+    }
+
+    /// 選單按下：已經在跑就不再送（上游 `if (trayRefreshInFlight) return`）。
+    fn request(&mut self) -> bool {
+        if *self != RescanState::Idle {
+            return false;
+        }
+        *self = RescanState::Requested;
+        true
+    }
+
+    fn started(&mut self, reason: &str) {
+        if *self == RescanState::Requested && Self::manual(reason) {
+            *self = RescanState::Running;
+        }
+    }
+
+    /// 那次 manual tick 結束時回傳 true（呼叫端依結果通知）。
+    fn finished(&mut self, reason: &str) -> bool {
+        if *self == RescanState::Running && Self::manual(reason) {
+            *self = RescanState::Idle;
+            return true;
+        }
+        false
+    }
+}
+
+static RESCAN: Mutex<RescanState> = Mutex::new(RescanState::Idle);
+
+fn set_rescan_item() {
+    if let Some(item) = RESCAN_ITEM.get() {
+        let busy = *RESCAN.lock().unwrap() != RescanState::Idle;
+        let _ = item.set_text(tr(
+            if busy {
+                "正在重新掃描…"
+            } else {
+                "立即重新掃描"
+            },
+            &[],
+        ));
+        let _ = item.set_enabled(!busy);
+    }
+}
+
+fn rescan_failed(app: &AppHandle, error: &str) {
+    tracing::warn!(error, "tray rescan failed");
+    // 找 tray 的視窗要到主執行緒走一趟；另開工作，回報 tick 結束的收集迴圈不必等它。
+    let (app, title, body) = (app.clone(), tr("重新掃描失敗", &[]), error.to_string());
+    tauri::async_runtime::spawn_blocking(move || super::notify::error(&app, &title, &body));
+}
+
+fn rescan_from_tray(app: &AppHandle) {
+    if !RESCAN.lock().unwrap().request() {
+        return;
+    }
+    set_rescan_item();
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let requested = match state.runtime.lock().await.as_ref() {
+            Some(rt) => {
+                rt.request_rescan();
+                true
+            }
+            None => false,
+        };
+        if !requested {
+            // 收集程序沒有在跑（例如找不到 tokscale）：上游的 fetchStats 會直接失敗。
+            *RESCAN.lock().unwrap() = RescanState::Idle;
+            set_rescan_item();
+            let error = state
+                .status
+                .read()
+                .unwrap()
+                .fatal
+                .clone()
+                .unwrap_or_else(|| tr("收集程序沒有在執行", &[]));
+            rescan_failed(&app, &error);
+        }
+    });
+}
+
+/// bridge.rs：runtime 開始一次 tick。
+pub fn on_tick_started(reason: &str) {
+    RESCAN.lock().unwrap().started(reason);
+}
+
+/// bridge.rs：runtime 的 tick 結束；`error` = 失敗原因。tray 發起的那次失敗時通知使用者。
+pub fn on_tick_finished(app: &AppHandle, reason: &str, error: Option<&str>) {
+    if !RESCAN.lock().unwrap().finished(reason) {
+        return;
+    }
+    set_rescan_item();
+    if let Some(error) = error {
+        rescan_failed(app, error);
+    }
+}
+
+/// runtime 重建（設定改變）時放掉進行中的請求：舊 runtime 的那次 tick 可能不會回報結束。
+pub fn reset_rescan() {
+    *RESCAN.lock().unwrap() = RescanState::Idle;
+    set_rescan_item();
 }
 
 fn fmt_tokens(n: i64) -> String {
@@ -242,10 +407,10 @@ pub fn refresh(app: &AppHandle) {
     }
 }
 
-fn apply_patch(app: &AppHandle, key: &str, value: &str) {
+fn apply_patch(app: &AppHandle, key: &str, value: impl Into<Value>) {
     let app = app.clone();
     let mut patch = serde_json::Map::new();
-    patch.insert(key.into(), serde_json::Value::String(value.into()));
+    patch.insert(key.into(), value.into());
     tauri::async_runtime::spawn(async move {
         if let Err(e) = super::commands::apply_settings_patch(&app, patch).await {
             tracing::warn!(error = %e, "tray settings change failed");
@@ -355,6 +520,52 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             .collect::<Vec<_>>(),
     )?;
 
+    let check = |id: String, source: &'static str, checked: bool| {
+        CheckMenuItem::with_id(app, id, tr(source, &[]), true, checked, None::<&str>)
+    };
+    let dock_show = check(
+        "dock:show".into(),
+        "顯示邊緣額度條",
+        settings.edge_dock_enabled,
+    )?;
+    let dock_modes = DOCK_MODES
+        .iter()
+        .map(|(id, source)| {
+            check(
+                format!("dockMode:{id}"),
+                source,
+                *id == settings.edge_dock_mode,
+            )
+            .map(|i| (i, *id, *source))
+        })
+        .collect::<tauri::Result<Vec<_>>>()?;
+    let dock_sides = DOCK_SIDES
+        .iter()
+        .map(|(id, source)| {
+            check(
+                format!("dockSide:{id}"),
+                source,
+                *id == settings.edge_dock_side,
+            )
+            .map(|i| (i, *id, *source))
+        })
+        .collect::<tauri::Result<Vec<_>>>()?;
+    let dock_sep = PredefinedMenuItem::separator(app)?;
+    let dock_sep2 = PredefinedMenuItem::separator(app)?;
+    let mut dock_entries: Vec<&dyn tauri::menu::IsMenuItem<Wry>> = vec![&dock_show, &dock_sep];
+    dock_entries.extend(
+        dock_modes
+            .iter()
+            .map(|(i, _, _)| i as &dyn tauri::menu::IsMenuItem<Wry>),
+    );
+    dock_entries.push(&dock_sep2);
+    dock_entries.extend(
+        dock_sides
+            .iter()
+            .map(|(i, _, _)| i as &dyn tauri::menu::IsMenuItem<Wry>),
+    );
+    let dock_menu = Submenu::with_items(app, tr("邊緣額度條", &[]), true, &dock_entries)?;
+
     let (update_text, update_enabled) = update_item_text(&updater::current_state(app));
     let update = MenuItem::with_id(app, "update", update_text, update_enabled, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
@@ -369,6 +580,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             &sep,
             &mode_menu,
             &content_menu,
+            &dock_menu,
             &settings_item,
             &logs,
             &update,
@@ -379,7 +591,6 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
 
     for (i, source) in [
         (toggle, "顯示／隱藏"),
-        (rescan, "立即重新掃描"),
         (settings_item, "設定…"),
         (dashboard, "用量儀表板…"),
         (logs, "開啟日誌資料夾"),
@@ -411,7 +622,19 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     for (i, _, source) in content_items {
         texts.push((Labeled::Check(i), source));
     }
+    texts.push((Labeled::Sub(dock_menu), "邊緣額度條"));
+    texts.push((Labeled::Check(dock_show.clone()), "顯示邊緣額度條"));
+    for (i, _, source) in dock_modes.iter().chain(dock_sides.iter()) {
+        texts.push((Labeled::Check(i.clone()), source));
+    }
+    let _ = DOCK_ITEMS.set(DockItems {
+        show: dock_show,
+        modes: dock_modes.into_iter().map(|(i, id, _)| (i, id)).collect(),
+        sides: dock_sides.into_iter().map(|(i, id, _)| (i, id)).collect(),
+    });
     let _ = UPDATE_ITEM.set(update);
+    let _ = RESCAN_ITEM.set(rescan);
+    set_rescan_item();
     let _ = TEXTS.set(texts);
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
@@ -433,15 +656,20 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                 apply_patch(app, "trayContent", content);
                 return;
             }
+            if let Some(mode) = id.strip_prefix("dockMode:") {
+                apply_patch(app, "edgeDockMode", mode);
+                return;
+            }
+            if let Some(side) = id.strip_prefix("dockSide:") {
+                apply_patch(app, "edgeDockSide", side);
+                return;
+            }
             match id {
                 "toggle" => window::toggle_main(app),
-                "rescan" => {
-                    let app = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        if let Some(rt) = app.state::<AppState>().runtime.lock().await.as_ref() {
-                            rt.request_rescan();
-                        }
-                    });
+                "rescan" => rescan_from_tray(app),
+                "dock:show" => {
+                    let enabled = app.state::<AppState>().settings().edge_dock_enabled;
+                    apply_patch(app, "edgeDockEnabled", !enabled);
                 }
                 "settings" => {
                     let _ = window::open_settings(app);
@@ -488,4 +716,34 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         }
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RescanState;
+
+    #[test]
+    fn a_tray_rescan_waits_for_its_own_manual_tick() {
+        let mut s = RescanState::default();
+        assert!(s.request());
+        assert!(!s.request(), "already in flight");
+        // 請求當下正在跑的 tick（或 watch tick）結束不算。
+        assert!(!s.finished("manual"));
+        s.started("watch");
+        assert!(!s.finished("watch"));
+        s.started("manual");
+        assert_eq!(s, RescanState::Running);
+        assert!(!s.finished("interval"));
+        assert!(s.finished("manual"));
+        assert_eq!(s, RescanState::Idle);
+        assert!(!s.finished("manual"), "reported once");
+    }
+
+    #[test]
+    fn manual_ticks_do_nothing_without_a_tray_request() {
+        let mut s = RescanState::default();
+        s.started("manual");
+        assert!(!s.finished("manual"));
+        assert_eq!(s, RescanState::Idle);
+    }
 }

@@ -6,8 +6,12 @@
 //! 與上游的差異：上游用兩個視窗（rail + 說明泡泡）並輪詢游標座標；這裡只有一個視窗，hover 直接用
 //! webview 的滑鼠事件（非作用中的視窗也收得到），說明放在圓環下方的標籤。不做拖曳調整位置，
 //! 位置由設定 `edgeDockOffset`（0.1–0.9，垂直位置比例）決定，只放在主螢幕。
+//!
+//! `edgeDockMode = always`（上游永遠顯示）：一直是展開的圓環列，不收回 peek。格數只有前端知道
+//! （dockItems.ts），所以由前端在格數改變時呼叫 `dock_expand`；這裡記住上一次的格數，換邊或
+//! 換位置重新擺放時直接展開，不先縮回 peek 再閃一下。
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use serde::Serialize;
 use tauri::{
@@ -34,6 +38,14 @@ pub struct DockView {
 }
 
 static EXPANDED: AtomicBool = AtomicBool::new(false);
+/// 上一次展開時的格數（0 = 還沒展開過）。
+static LAST_CELLS: AtomicU32 = AtomicU32::new(0);
+
+/// 重新擺放時的樣子：永遠顯示而且知道格數就展開，否則收成 peek。
+fn resting_cells(settings: &Settings) -> Option<u32> {
+    let n = LAST_CELLS.load(Ordering::SeqCst);
+    (settings.edge_dock_mode == "always" && n > 0).then_some(n)
+}
 
 /// 目前的 dock 狀態（前端啟動時問一次）。
 pub fn current(app: &AppHandle) -> DockView {
@@ -80,7 +92,7 @@ pub fn sync(app: &AppHandle) {
             }
         },
     };
-    place(app, &settings, None);
+    place(app, &settings, resting_cells(&settings));
     let _ = w.show();
 }
 
@@ -134,7 +146,9 @@ pub fn dock_get(app: AppHandle) -> DockView {
 #[tauri::command]
 pub fn dock_expand(app: AppHandle, cells: u32) {
     let settings = app.state::<AppState>().settings();
-    place(&app, &settings, Some(cells.min(12)));
+    let cells = cells.min(12);
+    LAST_CELLS.store(cells, Ordering::SeqCst);
+    place(&app, &settings, Some(cells));
 }
 
 #[tauri::command]

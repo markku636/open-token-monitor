@@ -1,5 +1,6 @@
 // 邊緣額度條的視窗內容（src-tauri/src/gui/dock.rs）：收合時是貼在螢幕邊的細條（peek），游標碰到就
 // 請 Rust 展開成圓環列；游標離開 320 ms 後收回（上游 EDGE_DOCK_TIMING.hideDelayMs）。點圓環開啟額度分頁。
+// `edgeDockMode = always`（上游永遠顯示）：有額度就一直展開、格數變了就重新展開，游標離開不收回。
 
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
@@ -55,10 +56,13 @@ function Ring({ cell }: { cell: DockCell }) {
 export function Dock() {
   const bootstrap = useApp((s) => s.bootstrap);
   const limits = useApp((s) => s.limits);
+  const always = useApp((s) => s.settings?.edgeDockMode === "always");
   const { expanded, side } = useDock();
   const cells = dockCells(limits);
   const reveal = useRef<number | undefined>(undefined);
   const hide = useRef<number | undefined>(undefined);
+  /** 最近一次請 Rust 展開的格數（永遠顯示時格數變了要重新展開）。 */
+  const shown = useRef(0);
 
   useEffect(() => {
     void bootstrap();
@@ -73,15 +77,30 @@ export function Dock() {
     window.clearTimeout(reveal.current);
     window.clearTimeout(hide.current);
   };
+  const expand = (n: number) => {
+    shown.current = n;
+    void api.dockExpand(n);
+  };
+
+  useEffect(() => {
+    if (!always || !isTauri()) return;
+    window.clearTimeout(reveal.current);
+    window.clearTimeout(hide.current);
+    if (cells.length > 0 && (!expanded || cells.length !== shown.current)) {
+      shown.current = cells.length;
+      void api.dockExpand(cells.length);
+    } else if (cells.length === 0 && expanded) void api.dockCollapse();
+  }, [always, cells.length, expanded]);
+
   const enter = () => {
     cancel();
     if (!expanded && cells.length > 0) {
-      reveal.current = window.setTimeout(() => void api.dockExpand(cells.length), REVEAL_DELAY_MS);
+      reveal.current = window.setTimeout(() => expand(cells.length), REVEAL_DELAY_MS);
     }
   };
   const leave = () => {
     cancel();
-    if (expanded) hide.current = window.setTimeout(() => void api.dockCollapse(), HIDE_DELAY_MS);
+    if (expanded && !always) hide.current = window.setTimeout(() => void api.dockCollapse(), HIDE_DELAY_MS);
   };
   const inner = side === "left" ? "rounded-r-md" : "rounded-l-md";
 

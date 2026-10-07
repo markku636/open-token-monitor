@@ -10,7 +10,7 @@ use super::state::{AppState, AppStatus, SettingsView};
 use super::{updater, window};
 use crate::display::LocalStats;
 use crate::error::{AppError, AppResult};
-use crate::settings::Settings;
+use crate::settings::{Settings, WindowMode};
 use crate::update::UpdateState;
 
 /// 改了這些欄位就要重建 runtime（收集內容或上傳目標變了）。
@@ -34,10 +34,33 @@ const RUNTIME_FIELDS: &[&str] = &[
     "limitsRefreshMs",
 ];
 
-fn save(state: &AppState, next: Settings) -> AppResult<()> {
+/// 存檔並回傳實際存下的設定。`windowMaximized` 只由視窗事件寫（`persist_window_maximized`），
+/// 這裡一律沿用目前的值，patch 讀設定到存檔之間的最大化變動才不會被舊值蓋掉。
+fn save(state: &AppState, mut next: Settings) -> AppResult<Settings> {
+    let mut current = state.settings.write().unwrap();
+    next.window_maximized = current.window_maximized;
     next.save_in(&crate::store::config_dir())?;
-    *state.settings.write().unwrap() = next;
-    Ok(())
+    *current = next.clone();
+    Ok(next)
+}
+
+/// 視窗最大化或還原（window.rs `on_resized`）：寫回 `windowMaximized`，前端的最大化鈕跟著換圖示。
+pub(super) fn persist_window_maximized(app: &AppHandle, maximized: bool) {
+    let state = app.state::<AppState>();
+    {
+        let mut current = state.settings.write().unwrap();
+        if current.window_maximized == maximized {
+            return;
+        }
+        let mut next = current.clone();
+        next.window_maximized = maximized;
+        if let Err(e) = next.save_in(&crate::store::config_dir()) {
+            tracing::warn!(error = %e, maximized, "failed to save windowMaximized");
+            return;
+        }
+        *current = next;
+    }
+    emit_settings(app);
 }
 
 pub(super) fn apply_autostart(app: &AppHandle, enabled: bool) {
@@ -81,9 +104,19 @@ pub(super) async fn apply_settings_patch(
     let after = serde_json::to_value(&next).unwrap_or_default();
     let changed = |k: &str| before.get(k) != after.get(k);
     let restart = RUNTIME_FIELDS.iter().any(|k| changed(k));
-    save(&state, next.clone())?;
+    let next = save(&state, next)?;
+    // 先處理系統匣圖示：要進系統匣模式時圖示得已經在（popover 以它為錨點）。
+    if changed("showTrayIcon") {
+        super::tray::sync_visibility(&app, &next);
+    }
     if changed("windowMode") {
-        window::apply_mode(&app, next.window_mode);
+        window::apply_mode(&app, &next);
+        // 上游 exitTrayMode：離開系統匣模式就把 widget 叫出來（照 `windowMaximized` 還原）。
+        if current.window_mode == WindowMode::Tray {
+            window::show_main(&app);
+        }
+    } else if changed("hideAppIcon") || changed("showTrayIcon") {
+        window::sync_taskbar(&app);
     }
     if changed("systemGlass") || changed("zoomFactor") {
         super::chrome::apply(&app, &next);
@@ -91,7 +124,11 @@ pub(super) async fn apply_settings_patch(
     if changed("windowToggleShortcut") {
         super::shortcut::apply(&app, &next.window_toggle_shortcut);
     }
-    if changed("edgeDockEnabled") || changed("edgeDockSide") || changed("edgeDockOffset") {
+    if changed("edgeDockEnabled")
+        || changed("edgeDockSide")
+        || changed("edgeDockOffset")
+        || changed("edgeDockMode")
+    {
         super::dock::sync(&app);
     }
     if changed("windowMode") || changed("floatingBubbleEnabled") {
@@ -173,11 +210,28 @@ pub async fn usage_rescan(state: State<'_, AppState>) -> AppResult<()> {
 
 #[tauri::command]
 pub fn window_show_ready(app: AppHandle, window: WebviewWindow) {
-    // 系統匣模式啟動時不顯示，等使用者按 tray 圖示。
-    let tray = app.state::<AppState>().settings().window_mode == crate::settings::WindowMode::Tray;
-    if window.label() == window::MAIN && !tray {
-        let _ = window.show();
+    // 系統匣模式啟動時不顯示，等使用者按 tray 圖示（reveal_main 裡判斷）。
+    if window.label() == window::MAIN {
+        window::reveal_main(&app);
     }
+}
+
+/// widget 標題列的最小化鈕（上游 `window:minimize`）。
+#[tauri::command]
+pub fn window_minimize(app: AppHandle) {
+    window::minimize_main(&app);
+}
+
+/// widget 標題列的最大化鈕：最大化 ↔ 還原。
+#[tauri::command]
+pub fn window_toggle_maximize(app: AppHandle) {
+    window::toggle_maximize_main(&app);
+}
+
+/// widget 標題列的 ×（上游 `window:close`）：有系統匣圖示就藏起來，沒有就結束。
+#[tauri::command]
+pub fn window_close(app: AppHandle) {
+    window::close_main(&app);
 }
 
 #[tauri::command]

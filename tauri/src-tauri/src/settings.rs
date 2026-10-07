@@ -131,6 +131,14 @@ pub struct Settings {
     /// 自動合併同一模型的不同寫法：`off` | `duplicates` | `prefix`（上游 `modelAliasGrouping`）。
     pub model_alias_grouping: String,
     pub window_mode: WindowMode,
+    /// 系統匣圖示（上游 `showTrayIcon`，預設開）。關掉時不能用系統匣模式、也不能隱藏工作列按鈕，
+    /// `validate()` 一起收斂（window_policy.rs）。
+    pub show_tray_icon: bool,
+    /// 工作列不顯示 widget 的按鈕（上游 `hideAppIcon`，預設關）；系統匣模式本來就不顯示。
+    pub hide_app_icon: bool,
+    /// 視窗是否最大化（上游 `windowMaximized`）。只由視窗事件寫入，前端的 patch 帶來也忽略；
+    /// 系統匣模式與收合的泡泡不改它，回到一般視窗時照它還原。
+    pub window_maximized: bool,
     /// floating 模式時，widget 拖到工作列上仍保持在它上面（Windows；上游預設關，實驗性）。
     pub keep_above_taskbar: bool,
     /// floating 模式時，失去焦點就縮成螢幕邊緣的小把手（上游 `floatingBubbleEnabled`，預設關）。
@@ -141,6 +149,8 @@ pub struct Settings {
     pub edge_dock_side: String,
     /// 額度條的垂直位置（0.1–0.9，工作區高度的比例；上游 `EDGE_DOCK_DEFAULT_OFFSET` = 0.3）。
     pub edge_dock_offset: f64,
+    /// `autoHide`（平常只露把手，游標碰到才展開）| `always`（一直展開，上游 `edgeDockMode`）。
+    pub edge_dock_mode: String,
     /// 40–100（%）
     pub opacity: u8,
     /// 系統匣圖示：`icon`（app 圖示）| `bars`（最接近上限的工具的兩條長條，上游 `bars`）|
@@ -197,11 +207,15 @@ impl Default for Settings {
             model_aliases: IndexMap::new(),
             model_alias_grouping: "off".into(),
             window_mode: WindowMode::Floating,
+            show_tray_icon: true,
+            hide_app_icon: false,
+            window_maximized: false,
             keep_above_taskbar: false,
             floating_bubble_enabled: false,
             edge_dock_enabled: false,
             edge_dock_side: "right".into(),
             edge_dock_offset: 0.3,
+            edge_dock_mode: "autoHide".into(),
             opacity: 92,
             tray_content: "icon".into(),
             system_glass: true,
@@ -329,6 +343,12 @@ impl Settings {
             self.edge_dock_offset = offset;
             changed.push("edgeDockOffset");
         }
+        // 上游：`always` 以外一律是 `autoHide`。
+        if self.edge_dock_mode != "always" && self.edge_dock_mode != "autoHide" {
+            self.edge_dock_mode = "autoHide".into();
+            changed.push("edgeDockMode");
+        }
+        changed.extend(crate::window_policy::normalize_tray_mode(self));
         if !matches!(self.tray_content.as_str(), "icon" | "bars" | "barsSessions") {
             self.tray_content = "icon".into();
             changed.push("trayContent");
@@ -439,6 +459,8 @@ impl Settings {
     /// 以 JSON patch（前端送來的部分欄位）更新，驗證後回傳新設定。未知或型別錯誤的欄位回錯。
     pub fn patched(&self, patch: &Map<String, Value>) -> AppResult<Settings> {
         const READ_ONLY: &[&str] = &["version", "deviceId"];
+        /// 只由程式自己寫的鍵：patch 帶來就略過（上游 settings:update 同樣先刪掉 `windowMaximized`）。
+        const RUNTIME_OWNED: &[&str] = &["windowMaximized"];
         let mut merged =
             serde_json::to_value(self).map_err(|e| AppError::Internal(e.to_string()))?;
         let obj = merged
@@ -447,6 +469,9 @@ impl Settings {
         for (key, value) in patch {
             if READ_ONLY.contains(&key.as_str()) {
                 return Err(AppError::Settings(format!("{key} 不可修改")));
+            }
+            if RUNTIME_OWNED.contains(&key.as_str()) {
+                continue;
             }
             obj.insert(key.clone(), value.clone());
         }
@@ -884,6 +909,54 @@ mod tests {
             s.patched(&patch).unwrap().sync_upload_interval_ms,
             1_200_000
         );
+    }
+
+    #[test]
+    fn window_maximized_is_not_patchable() {
+        let s = Settings::default();
+        let mut patch = Map::new();
+        patch.insert("windowMaximized".into(), json!(true));
+        patch.insert("hideAppIcon".into(), json!(true));
+        let next = s.patched(&patch).unwrap();
+        assert!(!next.window_maximized, "only window events write it");
+        assert!(next.hide_app_icon);
+    }
+
+    #[test]
+    fn hiding_the_tray_icon_takes_tray_mode_and_hide_app_icon_with_it() {
+        let s = Settings {
+            window_mode: WindowMode::Tray,
+            hide_app_icon: true,
+            ..Settings::default()
+        };
+        let mut patch = Map::new();
+        patch.insert("showTrayIcon".into(), json!(false));
+        let next = s.patched(&patch).unwrap();
+        assert_eq!(next.window_mode, WindowMode::Floating);
+        assert!(!next.hide_app_icon);
+        // 手改的 settings.json 也一樣。
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(SETTINGS_FILE),
+            r#"{"deviceId":"abc","showTrayIcon":false,"windowMode":"tray","hideAppIcon":true}"#,
+        )
+        .unwrap();
+        let (loaded, _) = Settings::load_in(dir.path()).unwrap();
+        assert_eq!(loaded.window_mode, WindowMode::Floating);
+        assert!(!loaded.hide_app_icon);
+    }
+
+    #[test]
+    fn edge_dock_mode_is_always_or_auto_hide() {
+        let mut s = Settings {
+            edge_dock_mode: "sometimes".into(),
+            ..Settings::default()
+        };
+        assert!(s.validate().contains(&"edgeDockMode"));
+        assert_eq!(s.edge_dock_mode, "autoHide");
+        s.edge_dock_mode = "always".into();
+        assert!(!s.validate().contains(&"edgeDockMode"));
+        assert_eq!(s.edge_dock_mode, "always");
     }
 
     #[test]

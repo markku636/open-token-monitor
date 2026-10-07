@@ -7,6 +7,8 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type WindowMode = "floating" | "normal" | "desktop" | "tray";
+/** 邊緣額度條：平常只露把手（autoHide）或一直展開（always）。 */
+export type EdgeDockMode = "autoHide" | "always";
 export type ThemeSetting = "system" | "dark" | "light";
 export type ValueSource = "cli" | "env" | "settings" | "keyring" | "baked" | "none";
 export type ClientStatus = "active" | "waiting" | "missing";
@@ -53,11 +55,18 @@ export interface Settings {
   modelAliases: Record<string, string>;
   modelAliasGrouping: "off" | "duplicates" | "prefix";
   windowMode: WindowMode;
+  /** 系統匣圖示；關掉時不能用系統匣模式與 hideAppIcon（Rust 端一起收斂）。 */
+  showTrayIcon: boolean;
+  /** 工作列不顯示 widget 的按鈕。 */
+  hideAppIcon: boolean;
+  /** 視窗是否最大化；只由視窗事件寫入，patch 帶了也會被忽略。 */
+  windowMaximized: boolean;
   keepAboveTaskbar: boolean;
   floatingBubbleEnabled: boolean;
   edgeDockEnabled: boolean;
   edgeDockSide: "right" | "left";
   edgeDockOffset: number;
+  edgeDockMode: EdgeDockMode;
   opacity: number;
   trayContent: "icon" | "bars" | "barsSessions";
   systemGlass: boolean;
@@ -95,11 +104,14 @@ export type SettingsPatch = Partial<
     | "limitProviders"
     | "limitsRefreshMs"
     | "windowMode"
+    | "showTrayIcon"
+    | "hideAppIcon"
     | "keepAboveTaskbar"
     | "floatingBubbleEnabled"
     | "edgeDockEnabled"
     | "edgeDockSide"
     | "edgeDockOffset"
+    | "edgeDockMode"
     | "opacity"
     | "trayContent"
     | "systemGlass"
@@ -549,6 +561,10 @@ export const api = {
   windowShowReady: () => invoke<void>("window_show_ready"),
   windowToggle: () => invoke<void>("window_toggle"),
   windowHide: () => invoke<void>("window_hide"),
+  windowMinimize: () => invoke<void>("window_minimize"),
+  windowToggleMaximize: () => invoke<void>("window_toggle_maximize"),
+  /** 標題列的 ×：有系統匣圖示就藏起來，沒有就結束程式。 */
+  windowClose: () => invoke<void>("window_close"),
   windowOpenSettings: () => invoke<void>("window_open_settings"),
   windowOpenDashboard: () => invoke<void>("window_open_dashboard"),
   appDiagnostics: () => invoke<Diagnostics>("app_diagnostics"),
@@ -862,11 +878,15 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     modelAliases: { "claude-haiku-4-5": "Haiku 4.5" },
     modelAliasGrouping: "duplicates",
     windowMode: "floating",
+    showTrayIcon: true,
+    hideAppIcon: false,
+    windowMaximized: false,
     keepAboveTaskbar: true,
     floatingBubbleEnabled: false,
     edgeDockEnabled: false,
     edgeDockSide: "right",
     edgeDockOffset: 0.3,
+    edgeDockMode: "autoHide",
     opacity: 92,
     trayContent: "icon",
     systemGlass: true,

@@ -194,8 +194,13 @@ pub fn collapse(app: &AppHandle) {
     drop(st);
     let _ = w.set_min_size(None::<LogicalSize<f64>>);
     let _ = w.set_resizable(false);
+    // 上游在 Windows 上以 `skipTaskbar`、不可最大化／最小化的視窗重建把手；這裡原地改。
+    // 最大化的視窗在 set_size 時會被還原，那時已經是收合狀態，`windowMaximized` 不會被改掉。
+    let _ = w.set_maximizable(false);
+    let _ = w.set_minimizable(false);
     let _ = w.set_size(PhysicalSize::new(hw as u32, hh as u32));
     let _ = w.set_position(PhysicalPosition::new(x, y));
+    window::sync_taskbar(app);
     emit(app, true, Some(side));
 }
 
@@ -213,6 +218,9 @@ pub fn expand(app: &AppHandle, focus: bool) {
     st.side = None;
     drop(st);
     let _ = w.set_resizable(true);
+    let _ = w.set_minimizable(true);
+    let settings = app.state::<AppState>().settings();
+    let _ = w.set_maximizable(crate::window_policy::maximizable(&settings));
     let _ = w.set_min_size(Some(LogicalSize::new(MIN_SIZE.0, MIN_SIZE.1)));
     if let (Some((_, _, ew, eh)), Some((handle, _, _))) = (expanded, bounds_and_work(app)) {
         let work = w
@@ -233,10 +241,13 @@ pub fn expand(app: &AppHandle, focus: bool) {
         let _ = w.set_size(PhysicalSize::new(width as u32, height as u32));
         let _ = w.set_position(PhysicalPosition::new(x, y));
     }
+    window::sync_taskbar(app);
     emit(app, false, None);
     if focus {
         SUPPRESS.store(true, Ordering::SeqCst);
         let _ = w.set_focus();
+        // 上游 expandFloatingBubble：要取得焦點的還原才照 `windowMaximized` 最大化回去。
+        window::restore_maximized(app, &w);
         tauri::async_runtime::spawn(async {
             tokio::time::sleep(Duration::from_millis(300)).await;
             SUPPRESS.store(false, Ordering::SeqCst);

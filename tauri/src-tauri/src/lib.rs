@@ -28,6 +28,7 @@ pub mod tokscale;
 pub mod trends;
 pub mod update;
 pub mod usage;
+pub mod window_policy;
 pub mod wire;
 
 #[cfg(feature = "gui")]
