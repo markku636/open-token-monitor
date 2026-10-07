@@ -1,0 +1,34 @@
+# Token Monitor hub API
+
+> Read-only HTTP API of this company's Token Monitor hub. It reports how many tokens employees' AI coding tools (Claude Code, Codex, Gemini CLI, …) used and what that would cost at API list prices (USD), by company, BU, department, team, employee, device, tool and model; and it lists the org tree, the employees, the AI accounts on each device and their quota windows.
+
+- Base URL: {{origin}}
+- Authenticate with `Authorization: Bearer <API token>`. Tokens look like `tmk_<8 hex>_<40 hex>`; a hub admin makes one per system on the dashboard and it is shown only once.
+- Each route needs one scope: `reports:read` (usage reports, devices, accounts) or `analytics:read` (units, employees, limits, usage analysis). Missing scope → 403.
+- JSON by default; add `format=csv` for CSV (UTF-8 with BOM). Errors are `{ "error": "<code>", "message": "…" }`.
+- `costUsd` is an API-list-price equivalent, not an invoice. Days are the device's local days.
+- v1 only ever gains fields; incompatible changes would go to /api/reports/v2/.
+
+## Docs
+
+- [Full API reference]({{origin}}/llms-full.txt): every endpoint, parameter, response field and error code, with examples, in one Markdown file
+- [OpenAPI 3.1 spec]({{origin}}/api/reports/v1/openapi.json): machine-readable, for client generators, Postman and Bruno
+
+## Endpoints (scope reports:read)
+
+- [GET /api/reports/v1/usage/monthly]({{origin}}/llms-full.txt): one month's usage grouped by org level, unit, employee, client, model or device
+- [GET /api/reports/v1/usage/daily]({{origin}}/llms-full.txt): the same per day, up to 400 days
+- [GET /api/reports/v1/usage/weekly]({{origin}}/llms-full.txt): the same per ISO week
+- [GET /api/reports/v1/devices]({{origin}}/llms-full.txt): every device and who it belongs to today
+- [GET /api/reports/v1/accounts]({{origin}}/llms-full.txt): the AI accounts and plans each device reported
+
+## Endpoints (scope analytics:read)
+
+- [GET /api/reports/v1/units]({{origin}}/llms-full.txt): the org tree with cost centres, headcount, devices and the last 30 days
+- [GET /api/reports/v1/employees]({{origin}}/llms-full.txt): the HR lists' employees, where they sit, their devices and the last 30 days
+- [GET /api/reports/v1/limits]({{origin}}/llms-full.txt): each AI account's quota windows (used %, reset time) and prepaid balance
+- [GET /api/reports/v1/usage/analysis]({{origin}}/llms-full.txt): the dashboard's trend and comparison analysis of a unit or one person
+
+## Optional
+
+- [Health]({{origin}}/api/health): no token needed; says whether the hub is up

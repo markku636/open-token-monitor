@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安裝 Token Monitor</title>
+<script>
+// The page's language, set before anything is drawn so a visitor never sees
+// the other one first. Every text is here in Traditional Chinese and in
+// English, and <html lang> shows one of them (the first rule in <style>).
+// ?lang= in the link wins (the Release notes link each half to its own), then
+// the language picked on this page before, then the browser's: Chinese for a
+// zh-* browser, English for any other.
+function pickLanguage(search, saved, browser) {
+  const known = (value) => {
+    const text = String(value || '').toLowerCase();
+    if (text.startsWith('zh')) return 'zh-Hant';
+    return text.startsWith('en') ? 'en' : null;
+  };
+  const asked = known(new URLSearchParams(String(search || '')).get('lang'));
+  if (asked) return asked;
+  if (known(saved)) return known(saved);
+  if (!browser) return 'zh-Hant';
+  return known(browser) === 'zh-Hant' ? 'zh-Hant' : 'en';
+}
+
+function savedLanguage() {
+  try { return localStorage.getItem('tm.lang'); } catch (e) { return null; }
+}
+
+document.documentElement.lang = pickLanguage(location.search, savedLanguage(), navigator.language);
+</script>
+<style>
+/* One language at a time: what is marked lang="en" shows on an English page,
+   what is marked lang="zh-Hant" on a Chinese one. */
+html:not([lang="en"]) [lang="en"],html[lang="en"] [lang="zh-Hant"]{display:none !important}
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --border:#e3e6ea; --text:#15181d; --text2:#3f4652; --muted:#6b7280;
+  --accent:#4f6bed; --warn:#c2810a;
+  --shadow:0 1px 2px rgba(16,20,28,.06),0 6px 18px rgba(16,20,28,.05);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1115; --panel:#171a20; --border:#272b33; --text:#e8eaee; --text2:#c2c7d0; --muted:#939aa6;
+    --accent:#7b91ff; --warn:#e0a33a;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1115; --panel:#171a20; --border:#272b33; --text:#e8eaee; --text2:#c2c7d0; --muted:#939aa6;
+  --accent:#7b91ff; --warn:#e0a33a;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",Roboto,sans-serif;
+}
+.wrap{max-width:820px; margin:0 auto; padding:24px 16px 64px}
+header{display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:8px}
+h1{font-size:21px; margin:0; letter-spacing:-.01em}
+h1 small{font-weight:400; color:var(--muted); font-size:13px; margin-left:8px}
+h2{font-size:17px; margin:0 0 10px}
+h3{font-size:15px; margin:18px 0 6px}
+a{color:var(--accent)}
+.actions{display:flex; flex-wrap:wrap; gap:8px}
+.ghost{border:1px solid var(--border); border-radius:8px; padding:7px 13px; background:none; font:inherit; font-size:13px; font-weight:500; line-height:1.4; color:var(--muted); text-decoration:none; white-space:nowrap; cursor:pointer}
+.ghost:hover{color:var(--text)}
+.lead{color:var(--text2); margin:4px 0 18px}
+.tabs{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px}
+.tabs button{
+  background:var(--panel); color:var(--text2); border:1px solid var(--border); border-radius:999px;
+  padding:7px 16px; font:inherit; font-size:14px; font-weight:500; cursor:pointer;
+}
+.tabs button[aria-selected="true"]{background:color-mix(in srgb,var(--accent) 14%,var(--panel)); color:var(--accent); border-color:color-mix(in srgb,var(--accent) 40%,var(--border)); font-weight:600}
+.tabs button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+section{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px 20px; box-shadow:var(--shadow); margin-bottom:16px; min-width:0}
+.dl{display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; margin:4px 0 14px}
+a.button{display:inline-block; background:var(--accent); color:#fff; text-decoration:none; border-radius:8px; padding:9px 16px; font-weight:600}
+a.button:hover{filter:brightness(1.08)}
+.file{color:var(--muted); font-size:13px; overflow-wrap:anywhere}
+ol{padding-left:22px; margin:8px 0}
+li{margin:6px 0}
+code{background:color-mix(in srgb,var(--text) 8%,transparent); padding:1px 5px; border-radius:4px; font-size:13px; overflow-wrap:anywhere}
+.cmd{position:relative; margin:8px 0}
+pre{
+  background:color-mix(in srgb,var(--text) 6%,transparent); border:1px solid var(--border); border-radius:8px;
+  padding:10px 12px; padding-right:64px; margin:0; overflow-x:auto; font-size:13px; line-height:1.5
+}
+.cmd button{
+  position:absolute; top:6px; right:6px; background:var(--panel); color:var(--muted); border:1px solid var(--border);
+  border-radius:6px; padding:2px 8px; font:inherit; font-size:12px; cursor:pointer
+}
+.cmd button:hover{color:var(--text)}
+.note{color:var(--muted); font-size:13px; margin:10px 0 0}
+#detected,#mobileNote{margin:0 0 12px}
+.warn{border-left:3px solid var(--warn); padding:2px 0 2px 10px; color:var(--text2)}
+footer{color:var(--muted); font-size:13px; margin-top:24px}
+
+/* The Windows steps, each next to a drawing of the window it talks about. The
+   drawings are markup rather than screenshots: no image route, no one's user
+   name in a path, sharp at any zoom. Like a screenshot they keep Windows' own
+   colours in both themes. Each language draws its own Windows and macOS. */
+.steps{list-style:none; padding:0; margin:4px 0 0; counter-reset:step}
+.steps>li{
+  counter-increment:step; margin:0; padding:18px 0; border-top:1px solid var(--border);
+  display:grid; grid-template-columns:minmax(0,1fr) minmax(0,340px); gap:12px 24px; align-items:start
+}
+.steps>li:first-child{border-top:0; padding-top:6px}
+.steps>li.plain{grid-template-columns:minmax(0,1fr)}
+.steps h3{margin:0 0 4px; display:flex; flex-wrap:wrap; gap:4px 10px; align-items:center}
+.steps h3::before{
+  content:counter(step); flex:none; display:inline-grid; place-items:center; width:24px; height:24px;
+  border-radius:50%; background:var(--accent); color:#fff; font-size:13px; font-weight:700
+}
+.steps p{margin:6px 0}
+.steps .dl{margin:10px 0 4px}
+/* A step's button as the other language's Windows or macOS names it. */
+.alt{color:var(--muted); font-size:13px; font-weight:400}
+.shot{
+  font:12px/1.5 "Segoe UI","Microsoft JhengHei","Noto Sans TC",sans-serif; border-radius:8px; overflow:hidden;
+  box-shadow:0 0 0 1px var(--border),var(--shadow); user-select:none
+}
+/* What to click, ringed in orange. */
+.hit{outline:3px solid #ff8a00; outline-offset:3px; border-radius:3px; animation:hit 1.8s ease-out infinite}
+@keyframes hit{0%{box-shadow:0 0 0 3px rgba(255,138,0,.6)} 70%,100%{box-shadow:0 0 0 14px rgba(255,138,0,0)}}
+@media (prefers-reduced-motion:reduce){.hit{animation:none}}
+.ring{outline:2px solid #ff8a00; outline-offset:1px; border-radius:3px; padding:0 3px; margin:0 3px}
+
+/* SmartScreen */
+.ss{position:relative; background:#0067c0; color:#fff; padding:14px 18px 18px}
+.ss-close{position:absolute; top:0; right:0; width:36px; height:28px; display:grid; place-items:center; background:#fff; color:#000}
+.ss-title{font-size:19px; font-weight:300; line-height:1.3; margin:6px 40px 8px 0}
+.ss-body{font-size:11.5px}
+.ss-link{display:inline-block; margin-top:4px; text-decoration:underline}
+.ss-info{display:grid; grid-template-columns:auto minmax(0,1fr); gap:2px 10px; margin:12px 0 0; font-size:11.5px}
+.ss-info dt,.ss-info dd{margin:0}
+.ss-info dd{overflow-wrap:anywhere}
+.ss-buttons{display:flex; justify-content:flex-end; gap:10px; margin-top:34px}
+.ss-btn{border:2px solid #fff; padding:3px 14px; font-weight:600}
+.ss-btn.solid{background:#fff; color:#000}
+
+/* File Explorer */
+.fx{background:#fff; color:#1b1b1b}
+.fx-bar{display:flex; align-items:center; gap:8px; padding:8px 12px; background:#f3f3f3; border-bottom:1px solid #e5e5e5}
+.fx-folder{width:16px; height:12px; border-radius:2px; background:#f4b73b}
+.fx-list{padding:6px 10px 16px}
+.fx-row{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; padding:5px 8px; border-radius:4px}
+.fx-row>span:first-child{overflow-wrap:anywhere}
+.fx-row.head{color:#6b6b6b; font-size:11px; padding-bottom:2px}
+.fx-row.sel{background:#cce8ff; margin:2px 0}
+.fx-row.dim{color:#8d8d8d}
+.app-icon{display:inline-block; width:13px; height:13px; border-radius:3px; background:#ff8a00; vertical-align:-2px; margin-right:6px}
+
+/* The installer */
+.nsis{background:#f0f0f0; color:#000}
+.nsis-bar{display:flex; align-items:center; gap:8px; padding:6px 10px; background:#fff}
+.nsis-bar .x{margin-left:auto; color:#444}
+.nsis-head{background:#fff; padding:8px 14px 10px; border-bottom:1px solid #d9d9d9}
+.nsis-head b{display:block}
+.nsis-head span{display:block; padding-left:12px; font-size:11.5px}
+.nsis-body{padding:14px 16px 10px; font-size:11.5px}
+.nsis-group{border:1px solid #d5d5d5; border-radius:3px; padding:6px 10px 10px; margin:0 0 8px; min-width:0}
+.nsis-group legend{padding:0 4px}
+.nsis-path{display:flex; gap:8px; align-items:center}
+.nsis-input{flex:1; min-width:0; background:#fff; border:1px solid #7a7a7a; padding:2px 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.nsis-brand{display:flex; align-items:center; gap:8px; color:#8a8a8a; font-size:11px; padding:0 14px}
+.nsis-brand::after{content:""; flex:1; border-top:1px solid #c9c9c9}
+.nsis-foot{display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; padding:8px 14px 16px}
+.nsis-btn{background:#fdfdfd; border:1px solid #adadad; border-radius:3px; padding:2px 0; min-width:64px; text-align:center}
+.nsis-btn.main{border-color:#0067c0; box-shadow:inset 0 0 0 1px #0067c0}
+.nsis-btn.off{color:#a0a0a0; border-color:#d3d3d3}
+.nsis-done{display:grid; grid-template-columns:28% minmax(0,1fr); background:#fff; border-bottom:1px solid #d9d9d9}
+.nsis-side{background:linear-gradient(165deg,#e3ecf6,#a9c1dd)}
+.nsis-done-body{padding:14px 16px 22px; font-size:11.5px}
+.nsis-done-body b{display:block; font-size:14px; font-weight:600; margin-bottom:6px}
+.nsis-check{display:flex; gap:6px; align-items:center; margin-top:16px}
+.nsis-box{width:13px; height:13px; border:1px solid #333; display:grid; place-items:center; font-size:10px; line-height:1}
+
+/* macOS windows, in macOS' light colours */
+.mw,.mal{font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif}
+/* An English one in a Latin font, whose quotes are not full width. */
+.mw[lang="en"],.mal[lang="en"]{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","Segoe UI",sans-serif}
+.mw{background:#fff; color:#1d1d1f}
+.mw-bar{display:flex; align-items:center; gap:10px; padding:8px 12px; background:#ececec; border-bottom:1px solid #d6d6d6}
+.mw-dots{display:flex; gap:6px; flex:none}
+.mw-dots i{width:11px; height:11px; border-radius:50%; background:#ff5f57}
+.mw-dots i:nth-child(2){background:#febc2e}
+.mw-dots i:nth-child(3){background:#28c840}
+.mw-title{flex:1; min-width:0; text-align:center; font-weight:600; margin-right:45px}
+.mini{flex:none; width:14px; height:14px; border-radius:4px; background:#c7c7cc}
+.mini.tm{background:#ff8a00}
+
+/* The dmg window */
+.dmg{display:flex; align-items:center; justify-content:space-evenly; gap:8px; padding:26px 12px 30px; background:#f7f7f7}
+.dmg-item{display:flex; flex-direction:column; align-items:center; gap:6px; padding:6px 8px; text-align:center}
+.mac-app{width:52px; height:52px; border-radius:12px; background:linear-gradient(160deg,#ffb14a,#ff7a00); box-shadow:0 2px 4px rgba(0,0,0,.18)}
+.mac-folder{position:relative; width:58px; height:44px; margin-top:6px; border-radius:3px 6px 6px 6px; background:linear-gradient(#7cc0f9,#4a9ff0)}
+.mac-folder::before{content:""; position:absolute; left:0; top:-6px; width:24px; height:8px; border-radius:3px 3px 0 0; background:#6bb6f7}
+.mac-folder::after{content:"A"; position:absolute; inset:0; display:grid; place-items:center; color:rgba(255,255,255,.85); font-size:20px; font-weight:700}
+.dmg-arrow{font-size:26px; color:#8e8e93}
+
+/* Finder and System Settings */
+.fd{display:grid; grid-template-columns:104px minmax(0,1fr)}
+.st{display:grid; grid-template-columns:132px minmax(0,1fr)}
+.fd-side,.st-side{display:flex; flex-direction:column; gap:1px; padding:8px 6px 14px; background:#f0f0f2; border-right:1px solid #e0e0e0; font-size:11.5px}
+.fd-side>span,.st-side>span{padding:2px 8px; border-radius:5px; overflow-wrap:anywhere}
+.fd-side .head{color:#8e8e93; font-size:10.5px; font-weight:600}
+.fd-side .on{background:#dcdce0}
+.st-side .mw-dots{padding:2px 4px 10px}
+.st-side .on{background:#0a64d6; color:#fff}
+.fd-list{padding:6px 8px 14px}
+.fd-row{display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:5px}
+.fd-row.sel{background:#0a64d6; color:#fff; margin:2px 0}
+.fd-row.dim{color:#8e8e93}
+.st-main{background:#f5f5f7; padding:10px 12px 14px; min-width:0}
+.st-title{display:block; font-size:13px; margin:0 0 6px}
+.st-nav{color:#8e8e93; letter-spacing:4px}
+.st-group{background:#fff; border:1px solid #e3e3e6; border-radius:8px; margin:6px 0}
+.st-group.dim{color:#8e8e93}
+.st-row{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:7px 10px; border-top:1px solid #ececef}
+.st-row:first-child{border-top:0}
+.st-row>span:first-child{min-width:0; overflow-wrap:anywhere}
+.st-val{color:#6e6e73; text-align:right}
+.st-btn{flex:none; background:#fff; border:1px solid #c9c9ce; border-radius:6px; padding:2px 10px; box-shadow:0 1px 1px rgba(0,0,0,.06); white-space:nowrap}
+.st-small{padding:0 10px 9px; color:#6e6e73; font-size:11px}
+.st-head{display:block; margin:2px 2px 6px; font-size:12.5px}
+
+/* The "Not Opened" alert */
+.mal{background:#ececec; color:#1d1d1f; padding:20px 20px 16px; text-align:center}
+.mal-icon{position:relative; display:block; width:48px; height:48px; margin:0 auto 10px; border-radius:11px; background:linear-gradient(#b4b8bf,#73787f)}
+.mal-icon::before{content:""; position:absolute; inset:12px; border-radius:50%; border:6px solid #2c2c2e}
+.mal-icon::after{
+  content:"!"; position:absolute; right:-7px; bottom:-5px; width:24px; height:21px; padding-top:7px;
+  clip-path:polygon(50% 0,100% 100%,0 100%); background:#ffcc00; color:#000; font-size:11px; font-weight:800; line-height:1; text-align:center
+}
+.mal-title{display:block; font-size:13.5px; margin-bottom:6px}
+.mal-body{font-size:11.5px; color:#3a3a3c}
+.mal-buttons{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:16px}
+.mal-btn{border-radius:7px; padding:5px 0; background:#d9d9de; font-weight:500}
+.mal-btn.def{background:#0a7aff; color:#fff}
+/* Three buttons stack, as macOS lays them out. */
+.mal-buttons.stack{grid-template-columns:minmax(0,1fr); gap:7px}
+
+@media (max-width:700px){
+  .steps>li{grid-template-columns:minmax(0,1fr)}
+  .shot{max-width:400px}
+}
+@media (max-width:620px){
+  .wrap{padding:16px 12px 48px}
+  section{padding:14px}
+  h1 small{display:block; margin:2px 0 0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1><span lang="zh-Hant">安裝 Token Monitor</span><span lang="en">Install Token Monitor</span> <small>Windows · macOS · Linux</small></h1>
+  <div class="actions">
+    <button class="ghost" id="langToggle" type="button" hidden>English</button>
+    <a class="ghost" href="./"><span lang="zh-Hant">回到用量儀表板</span><span lang="en">Back to the usage dashboard</span></a>
+  </div>
+</header>
+
+<p class="lead" lang="zh-Hant">Token Monitor 統計這台電腦上 AI 工具（Claude Code、Codex、Cursor…）的用量，回報給公司的 hub。裝好打開後，它會自己連上公司的 hub，<b>不用輸入任何設定</b>，之後開機也會自動啟動。</p>
+<p class="lead" lang="en">Token Monitor counts how much the AI tools on this computer (Claude Code, Codex, Cursor…) are used and reports it to the company hub. Once installed and opened, it connects to the company hub by itself, <b>with nothing to set up</b>, and starts by itself every time you turn on the computer.</p>
+
+<div class="tabs" role="tablist" id="osTabs" aria-label="作業系統" hidden>
+  <button type="button" role="tab" id="tab-windows" data-os="windows" aria-controls="os-windows" aria-selected="false">Windows</button>
+  <button type="button" role="tab" id="tab-macos" data-os="macos" aria-controls="os-macos" aria-selected="false">macOS</button>
+  <button type="button" role="tab" id="tab-linux" data-os="linux" aria-controls="os-linux" aria-selected="false"><span lang="zh-Hant">Linux（Ubuntu 等）</span><span lang="en">Linux (Ubuntu, etc.)</span></button>
+</div>
+<p class="note" id="detected" hidden></p>
+<p class="note warn" id="mobileNote" hidden><span lang="zh-Hant">這一頁是在手機或平板上打開的。Token Monitor 要裝在你平常使用 AI 工具的電腦上，請在那台電腦打開這一頁。</span><span lang="en">You opened this page on a phone or tablet. Token Monitor goes on the computer where you use AI tools: open this page on that computer.</span></p>
+
+<section id="os-windows" role="tabpanel" aria-labelledby="tab-windows">
+  <h2>Windows 10 / 11</h2>
+  <p class="note" lang="zh-Hant">大約一分鐘，不需要管理員權限。每一步旁邊畫著會看到的視窗，用<span class="ring">橘色框</span>圈起來的就是要按的地方；英文版 Windows 的按鈕名稱寫在括號裡。</p>
+  <p class="note" lang="en">It takes about a minute and needs no administrator rights. Each step has a picture of the window you'll see, with what to click <span class="ring">ringed in orange</span>. The names on Chinese Windows are in brackets.</p>
+  <ol class="steps">
+    <li class="plain">
+      <div>
+        <h3 lang="zh-Hant">下載安裝檔</h3>
+        <h3 lang="en">Download the installer</h3>
+        <div class="dl">
+          <a class="button" id="dl-windows" hidden><span lang="zh-Hant">下載 Windows 安裝檔</span><span lang="en">Download the Windows installer</span></a>
+          <span class="file" lang="zh-Hant">Token-Monitor_&lt;版本&gt;_x64-setup.exe</span>
+          <span class="file" lang="en">Token-Monitor_&lt;version&gt;_x64-setup.exe</span>
+        </div>
+        <p lang="zh-Hant">檔案會存進「下載」資料夾。</p>
+        <p lang="en">It's saved in your Downloads folder.</p>
+      </div>
+    </li>
+    <li>
+      <div lang="zh-Hant">
+        <h3>從檔案總管打開安裝檔</h3>
+        <p>打開檔案總管的「下載」資料夾，在 <code>Token-Monitor_&lt;版本&gt;_x64-setup.exe</code> 上按兩下。在瀏覽器的下載清單對它按右鍵 →「在資料夾中顯示」，會直接打開這個資料夾。</p>
+        <p class="warn">不要在瀏覽器的下載清單直接點開它：公司電腦上的防毒軟體可能會擋下從瀏覽器打開、沒有數位簽章的安裝檔，看起來就像沒有反應。</p>
+      </div>
+      <div class="shot fx" lang="zh-Hant" role="img" aria-label="檔案總管的「下載」資料夾，Token Monitor 安裝檔那一列被圈起來">
+        <div class="fx-bar"><span class="fx-folder"></span>下載</div>
+        <div class="fx-list">
+          <div class="fx-row head"><span>名稱</span><span>類型</span></div>
+          <div class="fx-row sel hit"><span><span class="app-icon"></span>Token-Monitor_&lt;版本&gt;_x64-setup.exe</span><span>應用程式</span></div>
+          <div class="fx-row dim"><span>會議紀錄.docx</span><span>Word 文件</span></div>
+          <div class="fx-row dim"><span>報價單.pdf</span><span>PDF 檔案</span></div>
+        </div>
+      </div>
+      <div lang="en">
+        <h3>Open the installer from File Explorer</h3>
+        <p>Open the Downloads folder in File Explorer and double-click <code>Token-Monitor_&lt;version&gt;_x64-setup.exe</code>. In the browser's download list, right-click it → "Show in folder" to open that folder.</p>
+        <p class="warn">Don't open it straight from the browser's download list: the antivirus on company computers may block an unsigned installer opened from a browser, and it looks as if nothing happened.</p>
+      </div>
+      <div class="shot fx" lang="en" role="img" aria-label="The Downloads folder in File Explorer, with the Token Monitor installer's row ringed">
+        <div class="fx-bar"><span class="fx-folder"></span>Downloads</div>
+        <div class="fx-list">
+          <div class="fx-row head"><span>Name</span><span>Type</span></div>
+          <div class="fx-row sel hit"><span><span class="app-icon"></span>Token-Monitor_&lt;version&gt;_x64-setup.exe</span><span>Application</span></div>
+          <div class="fx-row dim"><span>Meeting notes.docx</span><span>Microsoft Word Document</span></div>
+          <div class="fx-row dim"><span>Quote.pdf</span><span>PDF File</span></div>
+        </div>
+      </div>
+    </li>
+    <li>
+      <div lang="zh-Hant">
+        <h3>按「其他資訊」<span class="alt">(More info)</span></h3>
+        <p>出現藍色的「Windows 已保護您的電腦」時，按「其他資訊」→「仍要執行」，先按左邊的「其他資訊」。</p>
+        <p>這是因為安裝檔還沒有數位簽章，Windows 還不認得它。</p>
+      </div>
+      <div class="shot ss" lang="zh-Hant" role="img" aria-label="藍色的「Windows 已保護您的電腦」視窗，左邊的「其他資訊」連結被圈起來">
+        <span class="ss-close">✕</span>
+        <div class="ss-title">Windows 已保護您的電腦</div>
+        <div class="ss-body">Microsoft Defender SmartScreen 已防止某個無法辨識的應用程式啟動。執行此應用程式可能會讓您的電腦暴露在風險之下。</div>
+        <span class="ss-link hit">其他資訊</span>
+        <div class="ss-buttons"><span class="ss-btn solid">不要執行</span></div>
+      </div>
+      <div lang="en">
+        <h3>Click "More info" <span class="alt">(其他資訊)</span></h3>
+        <p>When the blue "Windows protected your PC" appears, click "More info" → "Run anyway". First click "More info" on the left.</p>
+        <p>This is because the installer isn't digitally signed yet, so Windows doesn't recognize it.</p>
+      </div>
+      <div class="shot ss" lang="en" role="img" aria-label="The blue “Windows protected your PC” window, with the More info link on the left ringed">
+        <span class="ss-close">✕</span>
+        <div class="ss-title">Windows protected your PC</div>
+        <div class="ss-body">Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</div>
+        <span class="ss-link hit">More info</span>
+        <div class="ss-buttons"><span class="ss-btn solid">Don't run</span></div>
+      </div>
+    </li>
+    <li>
+      <div lang="zh-Hant">
+        <h3>按「仍要執行」<span class="alt">(Run anyway)</span></h3>
+        <p>視窗下方多了應用程式的名稱和「仍要執行」。應用程式是 <code>Token-Monitor_&lt;版本&gt;_x64-setup.exe</code> 就按「仍要執行」；發行者寫「不明的發行者」是正常的。</p>
+      </div>
+      <div class="shot ss" lang="zh-Hant" role="img" aria-label="同一個藍色視窗，多了應用程式名稱與「發行者：不明的發行者」，右下角的「仍要執行」按鈕被圈起來">
+        <span class="ss-close">✕</span>
+        <div class="ss-title">Windows 已保護您的電腦</div>
+        <div class="ss-body">Microsoft Defender SmartScreen 已防止某個無法辨識的應用程式啟動。執行此應用程式可能會讓您的電腦暴露在風險之下。</div>
+        <dl class="ss-info">
+          <dt>應用程式：</dt><dd>Token-Monitor_&lt;版本&gt;_x64-setup.exe</dd>
+          <dt>發行者：</dt><dd>不明的發行者</dd>
+        </dl>
+        <div class="ss-buttons"><span class="ss-btn hit">仍要執行</span><span class="ss-btn solid">不要執行</span></div>
+      </div>
+      <div lang="en">
+        <h3>Click "Run anyway" <span class="alt">(仍要執行)</span></h3>
+        <p>The app's name and "Run anyway" now show at the bottom of the window. If the app is <code>Token-Monitor_&lt;version&gt;_x64-setup.exe</code>, click "Run anyway". "Unknown publisher" is expected.</p>
+      </div>
+      <div class="shot ss" lang="en" role="img" aria-label="The same blue window, now with the app's name and “Publisher: Unknown publisher”, and the Run anyway button at the bottom right ringed">
+        <span class="ss-close">✕</span>
+        <div class="ss-title">Windows protected your PC</div>
+        <div class="ss-body">Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</div>
+        <dl class="ss-info">
+          <dt>App:</dt><dd>Token-Monitor_&lt;version&gt;_x64-setup.exe</dd>
+          <dt>Publisher:</dt><dd>Unknown publisher</dd>
+        </dl>
+        <div class="ss-buttons"><span class="ss-btn hit">Run anyway</span><span class="ss-btn solid">Don't run</span></div>
+      </div>
+    </li>
+    <li>
+      <div lang="zh-Hant">
+        <h3>按「安裝」<span class="alt">(Install)</span></h3>
+        <p>安裝位置不用改，直接按「安裝」。Token Monitor 裝在你自己的帳號底下，所以不會要求管理員密碼。</p>
+      </div>
+      <div class="shot nsis" lang="zh-Hant" role="img" aria-label="Token Monitor 安裝程式的「選擇安裝位置」畫面，右下角的「安裝」按鈕被圈起來">
+        <div class="nsis-bar"><span class="app-icon"></span>Token Monitor 安裝<span class="x">✕</span></div>
+        <div class="nsis-head"><b>選擇安裝位置</b><span>選擇 Token Monitor 要安裝的資料夾。</span></div>
+        <div class="nsis-body">
+          <fieldset class="nsis-group">
+            <legend>目標資料夾</legend>
+            <div class="nsis-path"><span class="nsis-input">C:\Users\&lt;你的帳號&gt;\AppData\Local\Programs\Token Monitor</span><span class="nsis-btn">瀏覽…</span></div>
+          </fieldset>
+          所需空間：約 128 MB
+        </div>
+        <div class="nsis-brand">Token Monitor &lt;版本&gt;</div>
+        <div class="nsis-foot"><span class="nsis-btn">&lt; 上一步</span><span class="nsis-btn main hit">安裝</span><span class="nsis-btn">取消</span></div>
+      </div>
+      <div lang="en">
+        <h3>Click "Install" <span class="alt">(安裝)</span></h3>
+        <p>Leave the install location as it is and click "Install". Token Monitor installs under your own account, so it doesn't ask for an administrator password.</p>
+      </div>
+      <div class="shot nsis" lang="en" role="img" aria-label="The Token Monitor installer's Choose Install Location page, with the Install button at the bottom right ringed">
+        <div class="nsis-bar"><span class="app-icon"></span>Token Monitor Setup<span class="x">✕</span></div>
+        <div class="nsis-head"><b>Choose Install Location</b><span>Choose the folder in which to install Token Monitor.</span></div>
+        <div class="nsis-body">
+          <fieldset class="nsis-group">
+            <legend>Destination Folder</legend>
+            <div class="nsis-path"><span class="nsis-input">C:\Users\&lt;you&gt;\AppData\Local\Programs\Token Monitor</span><span class="nsis-btn">Browse...</span></div>
+          </fieldset>
+          Space required: 128.0 MB
+        </div>
+        <div class="nsis-brand">Token Monitor &lt;version&gt;</div>
+        <div class="nsis-foot"><span class="nsis-btn">&lt; Back</span><span class="nsis-btn main hit">Install</span><span class="nsis-btn">Cancel</span></div>
+      </div>
+    </li>
+    <li>
+      <div lang="zh-Hant">
+        <h3>按「完成」<span class="alt">(Finish)</span></h3>
+        <p>裝好後保持勾選「執行 Token Monitor」，按「完成」。Token Monitor 會打開並自己連上公司的 hub，這樣就裝好了。</p>
+      </div>
+      <div class="shot nsis" lang="zh-Hant" role="img" aria-label="安裝完成的畫面，「執行 Token Monitor」已勾選，「完成」按鈕被圈起來">
+        <div class="nsis-bar"><span class="app-icon"></span>Token Monitor 安裝<span class="x">✕</span></div>
+        <div class="nsis-done">
+          <div class="nsis-side"></div>
+          <div class="nsis-done-body">
+            <b>正在完成 Token Monitor 安裝精靈</b>
+            Token Monitor 已安裝在你的電腦。按「完成」關閉安裝精靈。
+            <div class="nsis-check"><span class="nsis-box">✓</span>執行 Token Monitor</div>
+          </div>
+        </div>
+        <div class="nsis-foot"><span class="nsis-btn off">&lt; 上一步</span><span class="nsis-btn main hit">完成</span><span class="nsis-btn off">取消</span></div>
+      </div>
+      <div lang="en">
+        <h3>Click "Finish" <span class="alt">(完成)</span></h3>
+        <p>When it's done, keep "Run Token Monitor" checked and click "Finish". Token Monitor opens and connects to the company hub by itself, and you're all set.</p>
+      </div>
+      <div class="shot nsis" lang="en" role="img" aria-label="The installer's last page, with Run Token Monitor checked and the Finish button ringed">
+        <div class="nsis-bar"><span class="app-icon"></span>Token Monitor Setup<span class="x">✕</span></div>
+        <div class="nsis-done">
+          <div class="nsis-side"></div>
+          <div class="nsis-done-body">
+            <b>Completing Token Monitor Setup</b>
+            Token Monitor has been installed on your computer. Click Finish to close Setup.
+            <div class="nsis-check"><span class="nsis-box">✓</span>Run Token Monitor</div>
+          </div>
+        </div>
+        <div class="nsis-foot"><span class="nsis-btn off">&lt; Back</span><span class="nsis-btn main hit">Finish</span><span class="nsis-btn off">Cancel</span></div>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section id="os-macos" role="tabpanel" aria-labelledby="tab-macos">
+  <h2 lang="zh-Hant">macOS（Apple 晶片）</h2>
+  <h2 lang="en">macOS (Apple silicon)</h2>
+  <p lang="zh-Hant">只支援 Apple 晶片（M1、M2、M3、M4…）的 Mac。不確定是哪一種：點螢幕左上角的蘋果圖示 →「關於這台 Mac」，「晶片」寫 Apple M… 就可以安裝；寫「處理器 Intel」的 Mac 目前不支援。</p>
+  <p lang="en">Only Macs with Apple silicon (M1, M2, M3, M4…) are supported. Not sure which one you have? Click the Apple menu in the top-left corner of the screen → "About This Mac". If "Chip" says Apple M…, you can install it. Macs that list an Intel "Processor" are not supported yet.</p>
+  <p class="note" lang="zh-Hant">app 還沒有經過 Apple 公證，第一次打開會被 macOS 擋下，照下面做一次就好，之後就能直接打開。每一步旁邊畫著會看到的視窗，用<span class="ring">橘色框</span>圈起來的就是要按的地方；英文版 macOS 的名稱寫在括號裡。</p>
+  <p class="note" lang="en">The app isn't notarized by Apple yet, so macOS blocks it the first time you open it. Do this once, and from then on it opens normally. Each step has a picture of the window you'll see, with what to click <span class="ring">ringed in orange</span>. The names on Chinese macOS are in brackets.</p>
+  <ol class="steps">
+    <li class="plain">
+      <div>
+        <h3 lang="zh-Hant">下載安裝檔</h3>
+        <h3 lang="en">Download the installer</h3>
+        <div class="dl">
+          <a class="button" id="dl-macos" hidden><span lang="zh-Hant">下載 Mac 安裝檔</span><span lang="en">Download the Mac installer</span></a>
+          <span class="file" lang="zh-Hant">Token-Monitor_&lt;版本&gt;_aarch64.dmg</span>
+          <span class="file" lang="en">Token-Monitor_&lt;version&gt;_aarch64.dmg</span>
+        </div>
+        <p lang="zh-Hant">檔案會存進「下載」資料夾。</p>
+        <p lang="en">It's saved in your Downloads folder.</p>
+      </div>
+    </li>
+    <li>
+      <div lang="zh-Hant">
+        <h3>把 Token Monitor 拖進「應用程式」<span class="alt">(Applications)</span></h3>
+        <p>在 <code>Token-Monitor_&lt;版本&gt;_aarch64.dmg</code> 上按兩下，會打開一個視窗。把左邊的 <b>Token Monitor</b> 拖到右邊的 Applications 資料夾上。</p>
+        <p>app 要放在「應用程式」裡，開機才會自動啟動，之後也才能在 app 裡更新。</p>
+      </div>
+      <div class="shot mw" lang="zh-Hant" role="img" aria-label="打開 dmg 後的視窗，左邊的 Token Monitor 圖示被圈起來，箭頭指向右邊的 Applications 資料夾">
+        <div class="mw-bar"><span class="mw-dots"><i></i><i></i><i></i></span><span class="mw-title">Token Monitor</span></div>
+        <div class="dmg">
+          <div class="dmg-item hit"><span class="mac-app"></span>Token Monitor</div>
+          <span class="dmg-arrow">→</span>
+          <div class="dmg-item"><span class="mac-folder"></span>Applications</div>
+        </div>
+      </div>
+      <div lang="en">
+        <h3>Drag Token Monitor into Applications <span class="alt">(應用程式)</span></h3>
+        <p>Double-click <code>Token-Monitor_&lt;version&gt;_aarch64.dmg</code> and a window opens. Drag <b>Token Monitor</b> on the left onto the Applications folder on the right.</p>
+        <p>The app has to be in Applications to start by itself when you turn on the Mac, and to update from inside the app later.</p>
+      </div>
+      <div class="shot mw" lang="en" role="img" aria-label="The window the dmg opens, with the Token Monitor icon on the left ringed and an arrow to the Applications folder on the right">
+        <div class="mw-bar"><span class="mw-dots"><i></i><i></i><i></i></span><span class="mw-title">Token Monitor</span></div>
+        <div class="dmg">
+          <div class="dmg-item hit"><span class="mac-app"></span>Token Monitor</div>
+          <span class="dmg-arrow">→</span>
+          <div class="dmg-item"><span class="mac-folder"></span>Applications</div>
+        </div>
+      </div>
+    </li>
+    <li>
+      <div lang="zh-Hant">
+        <h3>從「應用程式」打開 Token Monitor</h3>
+        <p>打開 Finder，點左邊的「應用程式」，在 <b>Token Monitor</b> 上按兩下。</p>
+        <p>不要在 dmg 的視窗裡直接打開它：那只是安裝用的磁碟映像，裝好的 app 在「應用程式」裡。</p>
+      </div>
+      <div class="shot mw" lang="zh-Hant" role="img" aria-label="Finder 的「應用程式」資料夾，Token Monitor 那一列被圈起來">
+        <div class="mw-bar"><span class="mw-dots"><i></i><i></i><i></i></span><span class="mw-title">應用程式</span></div>
+        <div class="fd">
+          <div class="fd-side">
+            <span class="head">喜好項目</span>
+            <span>最近項目</span>
+            <span class="on">應用程式</span>
+            <span>桌面</span>
+            <span>文件</span>
+            <span>下載</span>
+          </div>
+          <div class="fd-list">
+            <div class="fd-row dim"><span class="mini"></span>Safari</div>
+            <div class="fd-row sel hit"><span class="mini tm"></span>Token Monitor</div>
+            <div class="fd-row dim"><span class="mini"></span>計算機</div>
+            <div class="fd-row dim"><span class="mini"></span>備忘錄</div>
+          </div>
+        </div>
+      </div>
+      <div lang="en">
+        <h3>Open Token Monitor from Applications</h3>
+        <p>Open Finder, click "Applications" on the left and double-click <b>Token Monitor</b>.</p>
+        <p>Don't open it from inside the dmg window: that's only the disk image it installs from. The installed app is in Applications.</p>
+      </div>
+      <div class="shot mw" lang="en" role="img" aria-label="The Applications folder in Finder, with the Token Monitor row ringed">
+        <div class="mw-bar"><span class="mw-dots"><i></i><i></i><i></i></span><span class="mw-title">Applications</span></div>
+        <div class="fd">
+          <div class="fd-side">
+            <span class="head">Favorites</span>
+            <span>Recents</span>
+            <span class="on">Applications</span>
+            <span>Desktop</span>
+            <span>Documents</span>
+            <span>Downloads</span>
+          </div>
+          <div class="fd-list">
+            <div class="fd-row dim"><span class="mini"></span>Calculator</div>
+            <div class="fd-row dim"><span class="mini"></span>Notes</div>
+            <div class="fd-row dim"><span class="mini"></span>Safari</div>
+            <div class="fd-row sel hit"><span class="mini tm"></span>Token Monitor</div>
+          </div>
+        </div>
+      </div>
+    </li>
+    <li>
+      <div lang="zh-Hant">
+        <h3>按「完成」<span class="alt">(Done)</span></h3>
+        <p>出現「未打開『Token Monitor』」（“Token Monitor” Not Opened），說 Apple 無法驗證它不含惡意軟體時，按左邊的「完成」把視窗關掉。</p>
+        <p class="warn"><b>不要</b>按右邊藍色的「丟到垃圾桶」（Move to Trash），那會把剛裝好的 app 刪掉。</p>
+        <p>舊版 macOS 的視窗長得不太一樣，按「好」或「取消」關掉就好。</p>
+      </div>
+      <div class="shot mal" lang="zh-Hant" role="img" aria-label="「未打開『Token Monitor』」的對話框，左邊的「完成」按鈕被圈起來，右邊藍色的是「丟到垃圾桶」">
+        <span class="mal-icon"></span>
+        <b class="mal-title">未打開「Token Monitor」</b>
+        <div class="mal-body">Apple 無法驗證「Token Monitor」是否不含可能會損害你的 Mac 或危害你隱私的惡意軟體。</div>
+        <div class="mal-buttons"><span class="mal-btn hit">完成</span><span class="mal-btn def">丟到垃圾桶</span></div>
+      </div>
+      <div lang="en">
+        <h3>Click "Done" <span class="alt">(完成)</span></h3>
+        <p>When the “Token Monitor” Not Opened window appears, saying Apple could not verify it is free of malware, click "Done" on the left to close it.</p>
+        <p class="warn"><b>Don't</b> click the blue "Move to Trash" on the right: it deletes the app you just installed.</p>
+        <p>On older macOS the window looks a little different: close it with "OK" or "Cancel".</p>
+      </div>
+      <div class="shot mal" lang="en" role="img" aria-label="The “Token Monitor” Not Opened alert, with the Done button on the left ringed; the blue one on the right is Move to Trash">
+        <span class="mal-icon"></span>
+        <b class="mal-title">“Token Monitor” Not Opened</b>
+        <div class="mal-body">Apple could not verify “Token Monitor” is free of malware that may harm your Mac or compromise your privacy.</div>
+        <div class="mal-buttons"><span class="mal-btn hit">Done</span><span class="mal-btn def">Move to Trash</span></div>
+      </div>
+    </li>
+    <li>
+      <div lang="zh-Hant">
+        <h3>打開「隱私權與安全性」<span class="alt">(Privacy &amp; Security)</span></h3>
+        <p>點螢幕左上角的蘋果圖示 →「系統設定⋯」（System Settings…），在左邊的清單往下捲，點「隱私權與安全性」。</p>
+      </div>
+      <div class="shot mw" lang="zh-Hant" role="img" aria-label="系統設定視窗，左邊清單的「隱私權與安全性」被圈起來">
+        <div class="st">
+          <div class="st-side">
+            <div class="mw-dots"><i></i><i></i><i></i></div>
+            <span>一般</span>
+            <span>外觀</span>
+            <span>輔助使用</span>
+            <span>⋯</span>
+            <span>鎖定畫面</span>
+            <span class="on hit">隱私權與安全性</span>
+            <span>Touch ID 與密碼</span>
+            <span>使用者與群組</span>
+          </div>
+          <div class="st-main">
+            <b class="st-title">隱私權與安全性</b>
+            <div class="st-group dim">
+              <div class="st-row"><span>定位服務</span><span>›</span></div>
+              <div class="st-row"><span>聯絡人</span><span>›</span></div>
+              <div class="st-row"><span>行事曆</span><span>›</span></div>
+              <div class="st-row"><span>照片</span><span>›</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div lang="en">
+        <h3>Open "Privacy &amp; Security" <span class="alt">(隱私權與安全性)</span></h3>
+        <p>Click the Apple menu in the top-left corner → "System Settings…", scroll down the list on the left and click "Privacy &amp; Security".</p>
+      </div>
+      <div class="shot mw" lang="en" role="img" aria-label="System Settings, with Privacy &amp; Security in the list on the left ringed">
+        <div class="st">
+          <div class="st-side">
+            <div class="mw-dots"><i></i><i></i><i></i></div>
+            <span>General</span>
+            <span>Appearance</span>
+            <span>Accessibility</span>
+            <span>⋯</span>
+            <span>Lock Screen</span>
+            <span class="on hit">Privacy &amp; Security</span>
+            <span>Touch ID &amp; Password</span>
+            <span>Users &amp; Groups</span>
+          </div>
+          <div class="st-main">
+            <b class="st-title">Privacy &amp; Security</b>
+            <div class="st-group dim">
+              <div class="st-row"><span>Location Services</span><span>›</span></div>
+              <div class="st-row"><span>Contacts</span><span>›</span></div>
+              <div class="st-row"><span>Calendars</span><span>›</span></div>
+              <div class="st-row"><span>Photos</span><span>›</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </li>
+    <li>
+      <div lang="zh-Hant">
+        <h3>按「強制打開」<span class="alt">(Open Anyway)</span></h3>
+        <p>右邊往下捲到最底的「安全性」（Security），會看到「已阻擋『Token Monitor』以保護你的 Mac。」，按旁邊的「強制打開」。</p>
+        <p>這個按鈕只在剛被擋下後約一小時內出現。找不到就回到步驟 3 再打開一次 app、按「完成」，再回來這裡。</p>
+      </div>
+      <div class="shot mw" lang="zh-Hant" role="img" aria-label="「隱私權與安全性」最底下的「安全性」，「已阻擋『Token Monitor』以保護你的 Mac。」旁邊的「強制打開」按鈕被圈起來">
+        <div class="mw-bar"><span class="st-nav">‹ ›</span><b>隱私權與安全性</b></div>
+        <div class="st-main">
+          <b class="st-head">安全性</b>
+          <div class="st-group">
+            <div class="st-row"><span>允許以下來源的應用程式</span><span class="st-val">App Store 與已識別的開發者</span></div>
+          </div>
+          <div class="st-group">
+            <div class="st-row"><span>已阻擋「Token Monitor」以保護你的 Mac。</span><span class="st-btn hit">強制打開</span></div>
+            <div class="st-small">Apple 無法驗證「Token Monitor」是否不含可能會損害你的 Mac 或危害你隱私的惡意軟體。</div>
+          </div>
+          <div class="st-group dim">
+            <div class="st-row"><span>檔案保險箱</span><span>關閉 ›</span></div>
+          </div>
+        </div>
+      </div>
+      <div lang="en">
+        <h3>Click "Open Anyway" <span class="alt">(強制打開)</span></h3>
+        <p>On the right, scroll down to "Security" at the bottom. Next to the message that “Token Monitor” was blocked to protect your Mac, click "Open Anyway".</p>
+        <p>The button only shows for about an hour after the app was blocked. If it isn't there, go back to step 3, open the app again, click "Done" and come back here.</p>
+      </div>
+      <div class="shot mw" lang="en" role="img" aria-label="Security at the bottom of Privacy &amp; Security, with the Open Anyway button next to “Token Monitor” was blocked to protect your Mac. ringed">
+        <div class="mw-bar"><span class="st-nav">‹ ›</span><b>Privacy &amp; Security</b></div>
+        <div class="st-main">
+          <b class="st-head">Security</b>
+          <div class="st-group">
+            <div class="st-row"><span>Allow applications from</span><span class="st-val">App Store &amp; Known Developers</span></div>
+          </div>
+          <div class="st-group">
+            <div class="st-row"><span>“Token Monitor” was blocked to protect your Mac.</span><span class="st-btn hit">Open Anyway</span></div>
+            <div class="st-small">Apple could not verify “Token Monitor” is free of malware that may harm your Mac or compromise your privacy.</div>
+          </div>
+          <div class="st-group dim">
+            <div class="st-row"><span>FileVault</span><span>Off ›</span></div>
+          </div>
+        </div>
+      </div>
+    </li>
+    <li>
+      <div lang="zh-Hant">
+        <h3>再按一次「強制打開」<span class="alt">(Open Anyway)</span></h3>
+        <p>會再跳出「要打開『Token Monitor』嗎？」（Open “Token Monitor”?），按中間的「強制打開」（Open Anyway）。</p>
+        <p class="warn"><b>不要</b>按最上面藍色的「丟到垃圾桶」（Move to Trash），那會把 app 刪掉。</p>
+        <p>接著輸入這台 Mac 的登入密碼（不是 Apple 帳號的密碼）或用 Touch ID。Token Monitor 會打開並自己連上公司的 hub，這樣就裝好了；之後從「應用程式」打開不會再被擋。</p>
+      </div>
+      <div class="shot mal" lang="zh-Hant" role="img" aria-label="「要打開『Token Monitor』嗎？」的對話框，三個按鈕由上而下是藍色的「丟到垃圾桶」、「強制打開」與「完成」，中間的「強制打開」被圈起來">
+        <span class="mal-icon"></span>
+        <b class="mal-title">要打開「Token Monitor」嗎？</b>
+        <div class="mal-body">Apple 無法驗證「Token Monitor」是否不含可能會損害你的 Mac 或危害你隱私的惡意軟體。除非你確定它來自值得信任的來源，否則請勿打開。</div>
+        <div class="mal-buttons stack"><span class="mal-btn def">丟到垃圾桶</span><span class="mal-btn hit">強制打開</span><span class="mal-btn">完成</span></div>
+      </div>
+      <div lang="en">
+        <h3>Click "Open Anyway" again <span class="alt">(強制打開)</span></h3>
+        <p>A second window, titled Open “Token Monitor”?, appears. Click "Open Anyway" in the middle.</p>
+        <p class="warn"><b>Don't</b> click the blue "Move to Trash" at the top: it deletes the app.</p>
+        <p>Then enter this Mac's login password (not your Apple Account password) or use Touch ID. Token Monitor opens and connects to the company hub by itself, and you're all set. From then on it opens from Applications without being blocked.</p>
+      </div>
+      <div class="shot mal" lang="en" role="img" aria-label="The Open “Token Monitor”? alert. Its three buttons from top to bottom are the blue Move to Trash, Open Anyway and Done; Open Anyway in the middle is ringed">
+        <span class="mal-icon"></span>
+        <b class="mal-title">Open “Token Monitor”?</b>
+        <div class="mal-body">Apple could not verify “Token Monitor” is free of malware that may harm your Mac or compromise your privacy. Don't open this unless you are certain it is from a trustworthy source.</div>
+        <div class="mal-buttons stack"><span class="mal-btn def">Move to Trash</span><span class="mal-btn hit">Open Anyway</span><span class="mal-btn">Done</span></div>
+      </div>
+    </li>
+  </ol>
+  <h3 lang="zh-Hant">用終端機一步完成</h3>
+  <h3 lang="en">Or do it in one step in Terminal</h3>
+  <p lang="zh-Hant">熟悉終端機的話，拖進「應用程式」之後執行下面這一行，就可以跳過步驟 4～7，直接打開。</p>
+  <p lang="en">If you're comfortable with Terminal, run this line after dragging the app into Applications to skip steps 4–7 and open it straight away.</p>
+  <div class="cmd"><pre>xattr -dr com.apple.quarantine "/Applications/Token Monitor.app"</pre></div>
+  <p lang="zh-Hant">說 app「已損毀，無法打開」時，app 本身沒有壞，是下載時加上的隔離標示擋住的：在終端機執行下面這一行，再打開一次。</p>
+  <p lang="en">If macOS says the app "is damaged and can't be opened", the app itself is fine: the quarantine flag added when you downloaded it is in the way. Run this line in Terminal and open the app again.</p>
+  <div class="cmd"><pre>xattr -cr "/Applications/Token Monitor.app"</pre></div>
+</section>
+
+<section id="os-linux" role="tabpanel" aria-labelledby="tab-linux">
+  <h2 lang="zh-Hant">Linux（x64，例如 Ubuntu）</h2>
+  <h2 lang="en">Linux (x64, such as Ubuntu)</h2>
+  <p lang="zh-Hant">這裡裝的是 Token Monitor 的桌面 app（AppImage），不是 hub 伺服器。</p>
+  <p lang="en">This installs the Token Monitor desktop app (an AppImage), not the hub server.</p>
+  <div class="dl">
+    <a class="button" id="dl-linux" hidden><span lang="zh-Hant">下載 Linux AppImage</span><span lang="en">Download the Linux AppImage</span></a>
+    <span class="file" lang="zh-Hant">Token-Monitor_&lt;版本&gt;_amd64.AppImage</span>
+    <span class="file" lang="en">Token-Monitor_&lt;version&gt;_amd64.AppImage</span>
+  </div>
+  <ol lang="zh-Hant">
+    <li>把 AppImage 放在固定的位置（例如 <code>~/Applications/</code>），開機啟動記的是這個路徑。</li>
+    <li>在終端機進到那個資料夾，執行：
+      <div class="cmd"><pre>chmod +x Token-Monitor_*_amd64.AppImage
+./Token-Monitor_*_amd64.AppImage</pre></div>
+    </li>
+    <li>說缺少 <code>libfuse.so.2</code> 時：Ubuntu 22.04 執行 <code>sudo apt install libfuse2</code>，24.04 執行 <code>sudo apt install libfuse2t64</code>，再執行一次。</li>
+  </ol>
+  <ol lang="en">
+    <li>Keep the AppImage in a fixed place (for example <code>~/Applications/</code>): starting at login remembers this path.</li>
+    <li>In a terminal, go to that folder and run:
+      <div class="cmd"><pre>chmod +x Token-Monitor_*_amd64.AppImage
+./Token-Monitor_*_amd64.AppImage</pre></div>
+    </li>
+    <li>If it says <code>libfuse.so.2</code> is missing: on Ubuntu 22.04 run <code>sudo apt install libfuse2</code>, on 24.04 run <code>sudo apt install libfuse2t64</code>, then run it again.</li>
+  </ol>
+</section>
+
+<section>
+  <h2 lang="zh-Hant">已經裝了舊版？</h2>
+  <h2 lang="en">Already have an older version?</h2>
+  <p lang="zh-Hant">直接安裝新版即可，設定和資料都會保留。</p>
+  <p lang="en">Just install the new version. Your settings and data are kept.</p>
+  <p lang="zh-Hant">app 會自己檢查更新：有新版時 app 裡會提示，按「下載更新」再按「重啟更新」就完成，不用再回來這裡下載。打包時沒有設定更新來源的舊版本還不會檢查，要手動裝一次新版；Mac 手動裝好新版後第一次打開會再被擋一次，照上面的步驟做即可。Mac 的 app 要放在「應用程式」裡才能在 app 裡更新，更新後打開不會再被擋。</p>
+  <p lang="en">The app checks for updates by itself: when there's a new version, the app tells you. Click "Download update", then "Restart to update", and you're done. No need to come back here to download it. Older versions built without an update source don't check yet, so install the new version by hand once. The first time you open a new version installed by hand on a Mac, macOS blocks it once more: follow the steps above. On a Mac, the app has to be in Applications to update from inside the app, and it isn't blocked after such an update.</p>
+  <p lang="zh-Hant">Linux 手動換新的 AppImage 時，先刪掉舊的檔案再打開新的，開機啟動會自動改成新的檔案。在 app 裡更新則不用做任何事。</p>
+  <p lang="en">On Linux, when you replace the AppImage by hand, delete the old file before opening the new one: starting at login switches to the new file by itself. Updating from inside the app needs nothing from you.</p>
+
+  <h2 lang="zh-Hant">遇到問題</h2>
+  <h2 lang="en">Need help?</h2>
+  <p lang="zh-Hant">請聯絡 Token Monitor 的管理者，並告訴他你的作業系統，以及下載的檔名（檔名裡有版本號）。</p>
+  <p lang="en">Contact your Token Monitor administrator and tell them your operating system and the name of the file you downloaded (it includes the version number).</p>
+  <p class="note warn" id="noLinks" hidden><span lang="zh-Hant">這台 hub 沒有設定下載網址，請向 Token Monitor 的管理者索取安裝檔。</span><span lang="en">This hub has no download link set up: ask your Token Monitor administrator for the installer.</span></p>
+  <p id="allLink" hidden><a id="allReleases" target="_blank" rel="noopener"><span lang="zh-Hant">所有版本與更新說明</span><span lang="en">All versions and release notes</span></a></p>
+</section>
+
+<footer><span lang="zh-Hant">每一版的 Release 頁列著那一版的檔案與 SHA256，安裝步驟連到這一頁。</span><span lang="en">Each version's Release page lists its files and their SHA256, and links here for the install steps.</span></footer>
+
+</div>
+
+<script>
+// A page anyone who can reach the hub may open, like the dashboard: it holds
+// no secret and no data, only steps. The hub injects window.TM_SETTINGS
+// (hub/server.js pageSettings): the GitLab Releases page and, when that is
+// one, the fixed link to each platform's newest installer.
+
+const $ = (id) => document.getElementById(id);
+
+// What the script writes itself, in each of the page's languages. The script
+// in <head> has already picked one into <html lang>.
+const TEXT = {
+  'zh-Hant': {
+    title: '安裝 Token Monitor', systems: '作業系統', other: 'en', otherName: 'English',
+    copy: '複製', copied: '已複製', copyByHand: '請手動複製',
+    detected: (os) => '看起來你用的是 ' + os + '，已經選好了。不是的話，點上面的其他系統。'
+  },
+  en: {
+    title: 'Install Token Monitor', systems: 'Operating system', other: 'zh-Hant', otherName: '中文',
+    copy: 'Copy', copied: 'Copied', copyByHand: 'Copy it by hand',
+    detected: (os) => 'Looks like you’re on ' + os + ', so it’s picked for you. If not, pick your system above.'
+  }
+};
+const OS_NAMES = { windows: 'Windows', macos: 'macOS', linux: 'Linux' };
+let detectedOs = null;
+
+function words() {
+  return TEXT[document.documentElement.lang] || TEXT['zh-Hant'];
+}
+
+// Which computer the visitor is on: 'windows', 'macos', 'linux', 'mobile', or
+// null when it cannot be told.
+function detectOs(nav) {
+  const n = nav || {};
+  const platform = String((n.userAgentData && n.userAgentData.platform) || n.platform || '');
+  const text = (platform + ' ' + String(n.userAgent || '')).toLowerCase();
+  if (text.includes('android') || text.includes('iphone') || text.includes('ipad') || text.includes('ipod')) return 'mobile';
+  // iPadOS asks for the desktop site and calls itself a Mac with a touch screen.
+  if (text.includes('mac') && Number(n.maxTouchPoints) > 1) return 'mobile';
+  if (text.includes('windows') || platform.toLowerCase().startsWith('win')) return 'windows';
+  if (text.includes('mac')) return 'macos';
+  if (text.includes('linux') || text.includes('x11') || text.includes('cros')) return 'linux';
+  return null;
+}
+
+// The tab to open: the link's #windows, #macos or #linux first, then the
+// visitor's own system, else Windows.
+function pickInitial(hash, detected) {
+  const names = ['windows', 'macos', 'linux'];
+  const asked = String(hash || '').replace(/^#/, '');
+  if (names.includes(asked)) return asked;
+  return names.includes(detected) ? detected : 'windows';
+}
+
+function osTabs() {
+  return [...document.querySelectorAll('#osTabs [role="tab"]')];
+}
+
+function selectOs(os, { focus = false, remember = true } = {}) {
+  for (const tab of osTabs()) {
+    const on = tab.dataset.os === os;
+    tab.setAttribute('aria-selected', on ? 'true' : 'false');
+    tab.tabIndex = on ? 0 : -1;
+    if (on && focus) tab.focus();
+    $('os-' + tab.dataset.os).hidden = !on;
+  }
+  if (remember) {
+    try { history.replaceState(null, '', '#' + os); } catch (e) { /* file:// */ }
+  }
+}
+
+// Shows the page in lang: the markup in that language (the first rule in
+// <style>), and what the script writes itself. A visitor's own pick is kept
+// for the next visit and in the address, so a copied link opens in it too.
+function showLanguage(lang, { remember = false } = {}) {
+  const shown = TEXT[lang] ? lang : 'zh-Hant';
+  document.documentElement.lang = shown;
+  const text = TEXT[shown];
+  document.title = text.title;
+  $('osTabs').setAttribute('aria-label', text.systems);
+  $('langToggle').textContent = text.otherName;
+  for (const button of document.querySelectorAll('.cmd button')) button.textContent = text.copy;
+  if (OS_NAMES[detectedOs]) $('detected').textContent = text.detected(OS_NAMES[detectedOs]);
+  if (!remember) return;
+  try { localStorage.setItem('tm.lang', shown); } catch (e) { /* no storage */ }
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set('lang', shown === 'en' ? 'en' : 'zh-TW');
+    history.replaceState(null, '', url.href);
+  } catch (e) { /* file:// */ }
+}
+
+// The download buttons: each platform's newest installer when the hub knows
+// its fixed link, else the Releases page itself.
+function applyLinks(settings) {
+  const s = settings || {};
+  const downloads = s.downloads || null;
+  let any = false;
+  for (const os of ['windows', 'macos', 'linux']) {
+    const url = (downloads && downloads[os]) || s.downloadUrl || '';
+    const link = $('dl-' + os);
+    if (!url) continue;
+    link.href = url;
+    link.hidden = false;
+    any = true;
+  }
+  if (s.downloadUrl) {
+    $('allReleases').href = s.downloadUrl;
+    $('allLink').hidden = false;
+  }
+  $('noLinks').hidden = any;
+}
+
+// A copy button on each command.
+function addCopyButtons() {
+  for (const box of document.querySelectorAll('.cmd')) {
+    const pre = box.querySelector('pre');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = words().copy;
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(pre.textContent);
+        button.textContent = words().copied;
+      } catch (e) {
+        button.textContent = words().copyByHand;
+      }
+      setTimeout(() => { button.textContent = words().copy; }, 2000);
+    });
+    box.append(button);
+  }
+}
+
+function start() {
+  try {
+    const theme = localStorage.getItem('tm.theme');
+    if (theme) document.documentElement.dataset.theme = theme;
+  } catch (e) { /* no storage */ }
+  applyLinks(window.TM_SETTINGS);
+  addCopyButtons();
+  detectedOs = detectOs(navigator);
+  $('mobileNote').hidden = detectedOs !== 'mobile';
+  $('detected').hidden = !OS_NAMES[detectedOs];
+  showLanguage(document.documentElement.lang);
+  $('langToggle').hidden = false;
+  $('langToggle').addEventListener('click', () => showLanguage(words().other, { remember: true }));
+  // Without this script every system's steps show at once; with it, one tab.
+  $('osTabs').hidden = false;
+  selectOs(pickInitial(location.hash, detectedOs), { remember: false });
+  for (const tab of osTabs()) tab.addEventListener('click', () => selectOs(tab.dataset.os));
+  $('osTabs').addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    const tabs = osTabs();
+    const at = tabs.findIndex((tab) => tab.getAttribute('aria-selected') === 'true');
+    const next = tabs[(at + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+    event.preventDefault();
+    selectOs(next.dataset.os, { focus: true });
+  });
+}
+
+start();
+</script>
+</body>
+</html>

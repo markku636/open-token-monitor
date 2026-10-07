@@ -1,0 +1,124 @@
+# The hub and its PostgreSQL. Build the hub image first (scripts/build-hub-image.js,
+# or `docker build -f docker/Dockerfile -t token-monitor-hub .`), then run from
+# the repo root and name its .env, so the `${…}` below are read from the same
+# file `npm run hub` uses (Compose otherwise looks for a .env beside this file):
+#
+#   docker compose -f docker/compose.yml --env-file .env up -d
+#
+# To run the hub against a PostgreSQL that IT operates instead, set
+# TOKEN_MONITOR_DATABASE_URL in .env and start only the hub:
+#
+#   docker compose -f docker/compose.yml --env-file .env up -d --no-deps hub
+#
+# Pinned so the project does not take its name from this file's directory.
+name: token-monitor
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: token-monitor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: token_monitor
+      POSTGRES_USER: postgres
+      # The superuser, for IT and the first-start script only; the hub never
+      # uses it. The init script (postgres/initdb) creates the hub's own role
+      # with TOKEN_MONITOR_DB_PASSWORD and, when a password is given, a
+      # read-only login for reporting tools. Both run only on an empty volume.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      TOKEN_MONITOR_DB_PASSWORD: ${TOKEN_MONITOR_DB_PASSWORD:?set TOKEN_MONITOR_DB_PASSWORD in .env}
+      TOKEN_MONITOR_DB_READONLY_PASSWORD: ${TOKEN_MONITOR_DB_READONLY_PASSWORD:-}
+    volumes:
+      # PostgreSQL 18 images keep their data under /var/lib/postgresql/18/docker,
+      # so the volume goes on /var/lib/postgresql.
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    # Published on the host's loopback by default, for database tools and the
+    # PostgreSQL tests on the Docker host; the hub uses the internal network.
+    # POSTGRES_HOST_BIND=0.0.0.0 opens it to other machines. ufw does not see
+    # Docker's published ports, so do that only after
+    # deploy/postgres-lan-firewall.sh limits who gets through.
+    ports:
+      - "${POSTGRES_HOST_BIND:-127.0.0.1}:${POSTGRES_HOST_PORT:-5432}:5432"
+    # Over TCP: on the first start the image initialises the database with a
+    # temporary server that listens on its socket only, and a socket check
+    # would call that ready while the real server is still to come.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d token_monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  hub:
+    image: token-monitor-hub
+    # Built locally from this repository, never pulled.
+    pull_policy: never
+    container_name: token-monitor-hub
+    restart: unless-stopped
+    # A PID 1 that reaps orphans and forwards signals. The prompt `docker stop`
+    # comes from the overlay's own SIGTERM handler (which also closes the SSE
+    # streams and exits 0); init on its own would only make the kill immediate.
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Published on the host's port 80, so clients enter just http://<host>.
+    # Inside, the hub keeps 17321: it runs as an unprivileged user, which may
+    # not bind a port below 1024. The host side has its own variable because
+    # `npm run hub` reads the same .env and takes TOKEN_MONITOR_PORT as the
+    # port to listen on.
+    ports:
+      - "${TOKEN_MONITOR_HOST_PORT:-80}:17321"
+    environment:
+      # Required, not optional: with no secret the hub refuses to bind anything
+      # but loopback inside the container and the published port would answer
+      # nothing. Compose reads this from the repo's .env, the same file
+      # `npm run hub` uses — but Compose expands `$` inside .env values and
+      # dotenv does not, so a secret containing `$` must be single-quoted there
+      # or the two sides disagree.
+      TOKEN_MONITOR_SECRET: ${TOKEN_MONITOR_SECRET:?set TOKEN_MONITOR_SECRET in .env (or the environment) before starting the hub}
+      # The database above, as the hub's own role. A password with characters
+      # that mean something in a URL (@ : / ? #) has to be percent-encoded here;
+      # a hex password needs nothing.
+      TOKEN_MONITOR_DATABASE_URL: ${TOKEN_MONITOR_DATABASE_URL:-postgres://token_monitor:${TOKEN_MONITOR_DB_PASSWORD}@postgres:5432/token_monitor}
+      # The overlay's settings (docs/hub.zh-TW.md). Empty means "not used" or the
+      # image default.
+      TOKEN_MONITOR_CLIENT_SECRETS: ${TOKEN_MONITOR_CLIENT_SECRETS:-}
+      TOKEN_MONITOR_DATABASE_SCHEMA: ${TOKEN_MONITOR_DATABASE_SCHEMA:-}
+      TOKEN_MONITOR_DATABASE_POOL_SIZE: ${TOKEN_MONITOR_DATABASE_POOL_SIZE:-}
+      # With a database the JSON file is only a cache rebuilt from it at every
+      # start, so it lives in memory instead of wearing the disk.
+      TOKEN_MONITOR_DATA_FILE: ${TOKEN_MONITOR_DATA_FILE:-/cache/devices.json}
+      TOKEN_MONITOR_TRUST_PROXY: ${TOKEN_MONITOR_TRUST_PROXY:-}
+      TOKEN_MONITOR_PUBLIC_DASHBOARD: ${TOKEN_MONITOR_PUBLIC_DASHBOARD:-}
+      TOKEN_MONITOR_CLIENT_DOWNLOAD_URL: ${TOKEN_MONITOR_CLIENT_DOWNLOAD_URL:-}
+      TOKEN_MONITOR_STREAM_WINDOW_MS: ${TOKEN_MONITOR_STREAM_WINDOW_MS:-}
+      TOKEN_MONITOR_INGEST_MIN_INTERVAL_MS: ${TOKEN_MONITOR_INGEST_MIN_INTERVAL_MS:-}
+      # The hub's daily pg_dump (hub/backups.js): how many to keep, and the
+      # hour (UTC) to make it.
+      TOKEN_MONITOR_BACKUP_KEEP: ${TOKEN_MONITOR_BACKUP_KEEP:-}
+      TOKEN_MONITOR_BACKUP_HOUR: ${TOKEN_MONITOR_BACKUP_HOUR:-}
+    volumes:
+      - hub-data:/data
+      # A volume of its own: 3.deploy-ubuntu.ps1 -ResetDatabase removes only
+      # postgres-data, so the backups outlive it. `docker compose down -v`
+      # removes this one too.
+      - hub-backups:/backups
+    tmpfs:
+      - /cache:uid=1000,gid=1000,mode=0700,size=512m
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:17321/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  postgres-data:
+  hub-data:
+  hub-backups:

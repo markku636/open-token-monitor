@@ -1,0 +1,22 @@
+meta {
+  name: Delete - bruno-test device
+  type: http
+  seq: 2
+}
+
+delete {
+  url: {{baseUrl}}/api/devices/bruno-test
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{clientKey}}
+}
+
+tests {
+  test("device deleted", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().ok).to.equal(true);
+  });
+}

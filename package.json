@@ -1,0 +1,37 @@
+{
+  "name": "open-token-monitor",
+  "private": true,
+  "description": "Self-hosted team edition of Token Monitor: a PostgreSQL-backed hub with organisation data, dashboard and reports, the Electron client packaging, and a Rust/Tauri client (tauri/). Upstream token-monitor is vendored in upstream/ as a git subtree.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "scripts": {
+    "hub": "node hub/server.js",
+    "test": "node --test \"tests/**/*.test.js\"",
+    "lint": "eslint .",
+    "check:upstream": "node scripts/check-upstream.js",
+    "upstream:status": "node scripts/upstream-status.js",
+    "upstream:update": "node scripts/update-upstream.js",
+    "upstream:impact": "node scripts/upstream-impact.js",
+    "smoke:hub": "node scripts/smoke-hub.js",
+    "build:image": "node scripts/build-hub-image.js",
+    "build:client": "node packaging/build-client.js",
+    "verify": "npm run check:upstream && npm run lint && npm test"
+  },
+  "dependencies": {
+    "dotenv": "17.4.2",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@eslint/compat": "2.1.0",
+    "@eslint/js": "10.0.1",
+    "eslint": "10.8.0",
+    "globals": "17.9.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/markku636/open-token-monitor.git"
+  }
+}

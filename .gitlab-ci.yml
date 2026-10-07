@@ -1,0 +1,342 @@
+# GitLab CI for an organisation that builds and deploys Open Token Monitor on
+# its own GitLab (docs/client-build.zh-TW.md). GitHub runs .github/workflows/.
+#
+#   verify                  every merge request and hub tag, and a pipeline
+#                          run by hand on main
+#   build:client:windows    tag client-vX.Y.Z-corp.N, or by hand in a pipeline
+#                          run by hand on main
+#   build:client:macos      the same, on the Mac runner tagged `macos`
+#   build:client:linux      the same: the AppImage
+#   release:client         tag client-vX.Y.Z-corp.N: package registry + Release,
+#                          whose newest one the installed apps update from
+#   build:hub               tag corp/vX.Y.Z-corp.N, which npm run build:image
+#                          pushes: the hub image, smoke-tested, into the
+#                          package registry (docs/packaging.zh-TW.md)
+#   deploy:hub             by hand on a hub tag, or in a pipeline run by hand
+#                          on main: the hub onto its server (docs/hub.zh-TW.md,
+#                          "從 GitLab 部署")
+#
+# A push to main without a tag runs nothing: Build → Pipelines → Run pipeline
+# on main makes the pipeline that offers the manual jobs.
+#
+# Every job names its runner: `ubuntu` is the Linux Docker runner, `macos` the
+# Mac shell runner, `hub-deploy` a shell runner on the hub's server that runs
+# its Docker. None of them runs untagged jobs.
+#
+# The client build values are CI/CD variables scoped to the environment
+# client/production: TM_CLIENT_HUB_URL, TM_CLIENT_SECRET (masked and hidden,
+# protected), optionally TM_CLIENT_ALLOW_HTTP, TM_CLIENT_SYNC_UPLOAD_INTERVAL_MS,
+# TM_CLIENT_START_AT_LOGIN, TM_CLIENT_START_MINIMIZED and
+# TM_CLIENT_OWN_DEVICE_ONLY. Never `set -x` or echo them in a job.
+
+stages:
+  - verify
+  - build
+  - release
+  - deploy
+
+variables:
+  CLIENT_TAG_RE: '/^client-v\d+\.\d+\.\d+-corp\.\d+$/'
+  HUB_TAG_RE: '/^corp\/v\d+\.\d+\.\d+-corp\.\d+$/'
+  npm_config_cache: "$CI_PROJECT_DIR/.npm"
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "web"
+
+.node_check: &node_check
+  - node -e "const [a,b]=process.versions.node.split('.').map(Number); if (a<22||(a===22&&b<15)) { console.error('Node >= 22.15 required, got '+process.versions.node); process.exit(1) }"
+
+verify:
+  stage: verify
+  tags: [ubuntu]
+  image: node:22
+  variables:
+    # check:upstream looks for the `git subtree --squash` commit of upstream/,
+    # which a shallow clone (GitLab's default depth) leaves out.
+    GIT_DEPTH: 0
+  cache:
+    key:
+      files: [package-lock.json]
+    paths: [.npm/]
+  script:
+    # The hub-deploy runner is Protected, so build:hub and deploy:hub of a hub
+    # tag that is not a protected tag would sit in pending for good. Fail here
+    # instead, saying what to change.
+    - |
+      if [ -n "${CI_COMMIT_TAG:-}" ] && [ "${CI_COMMIT_REF_PROTECTED:-}" != "true" ]; then
+        echo "${CI_COMMIT_TAG} is not a protected tag: the hub-deploy runner would never take build:hub or deploy:hub."
+        echo "Settings -> Repository -> Protected tags: protect corp/v* (Maintainers), then Build -> Pipelines -> Run pipeline for ${CI_COMMIT_TAG}."
+        exit 1
+      fi
+    - npm ci --no-audit --no-fund
+    - npm run verify
+  rules:
+    # A client tag only builds and releases. A hub tag is verified first:
+    # build:hub skips the checks npm run build:image made before tagging.
+    - if: $CI_COMMIT_TAG =~ $CLIENT_TAG_RE
+      when: never
+    - when: on_success
+
+.build_client:
+  stage: build
+  # Do not wait for verify: a build uses nothing verify makes, and the Mac
+  # build should not sit behind a Linux runner it does not need.
+  needs: []
+  environment:
+    name: client/production
+    action: prepare
+  variables:
+    # The app updates from the newest Release of this project
+    # (packaging/build-client.js updatePublishConfig()).
+    TM_CLIENT_UPDATE_PROJECT_URL: $CI_PROJECT_URL
+    TM_CLIENT_UPDATE_PROJECT_ID: $CI_PROJECT_ID
+  script:
+    - *node_check
+    - npm ci --no-audit --no-fund
+    # A tag carries the version; a manual build on main is X.Y.Z-corp.0.
+    - export TM_CLIENT_VERSION="${CI_COMMIT_TAG#client-v}"
+    - npm run build:client -- --platform "$CLIENT_PLATFORM"
+    - echo "CLIENT_VERSION=${TM_CLIENT_VERSION}" > client.env
+    # The Release notes link to the install page of the hub this build
+    # connects to; release:client has no environment to read the hub from.
+    - echo "INSTALL_URL=${TM_CLIENT_HUB_URL%/}/install" >> client.env
+  artifacts:
+    name: "token-monitor-client-$CLIENT_PLATFORM-$CI_COMMIT_REF_SLUG"
+    paths:
+      - dist/client/*.exe
+      - dist/client/*.dmg
+      - dist/client/*.AppImage
+      # What an installed Mac updates from; the dmg only installs.
+      - dist/client/*.zip
+      # The update info of each build: latest.yml, latest-mac.yml,
+      # latest-linux.yml.
+      - dist/client/latest*.yml
+    reports:
+      dotenv: client.env
+    expire_in: 30 days
+  rules:
+    - if: $CI_COMMIT_TAG =~ $CLIENT_TAG_RE
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: true
+
+build:client:windows:
+  extends: .build_client
+  tags: [ubuntu]
+  # Node 22 + wine, so electron-builder can make the NSIS installer on Linux.
+  image: electronuserland/builder:22-wine-05.26
+  variables:
+    CLIENT_PLATFORM: win
+
+build:client:macos:
+  extends: .build_client
+  # A shell runner on a Mac (Node 22, Xcode command line tools), registered
+  # with the tag `macos`. A tag pipeline waits here while that runner is off.
+  tags: [macos]
+  variables:
+    CLIENT_PLATFORM: mac
+
+build:client:linux:
+  extends: .build_client
+  tags: [ubuntu]
+  # The Windows build's image, already on the runner; the AppImage needs no wine.
+  image: electronuserland/builder:22-wine-05.26
+  variables:
+    CLIENT_PLATFORM: linux
+
+release:client:
+  stage: release
+  tags: [ubuntu]
+  # release-cli runs the `release:` keyword. On a GitLab that has moved to glab
+  # for releases, use registry.gitlab.com/gitlab-org/cli:latest instead.
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: build:client:windows
+      artifacts: true
+    - job: build:client:macos
+      artifacts: true
+    - job: build:client:linux
+      artifacts: true
+  rules:
+    - if: $CI_COMMIT_TAG =~ $CLIENT_TAG_RE
+  script:
+    - apk add --no-cache curl
+    # The installed apps take the newest Release as an update when its
+    # latest*.yml names a newer version, and find the installer by its link
+    # name. A yml of another version or another file name would offer the
+    # wrong update or none. A third argument names the line that must name the
+    # file: path, or for macOS a `files:` entry, the one electron-updater takes
+    # the zip from.
+    - |
+      check_update_info() {
+        grep -Eq "^version: '?${CLIENT_VERSION}'?\$" "dist/client/$1" \
+          && grep -Eq "^${3:-path}: '?$2'?\$" "dist/client/$1" \
+          || { echo "dist/client/$1 does not describe $2 ${CLIENT_VERSION}"; exit 1; }
+      }
+      check_update_info latest.yml "Token-Monitor_${CLIENT_VERSION}_x64-setup.exe"
+      check_update_info latest-mac.yml "Token-Monitor_${CLIENT_VERSION}_aarch64.zip" "  - url"
+      check_update_info latest-linux.yml "Token-Monitor_${CLIENT_VERSION}_amd64.AppImage"
+    - PACKAGE_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/token-monitor-client/${CLIENT_VERSION}"
+    # --retry: a moment without DNS on the runner ("Could not resolve host"),
+    # a timeout or a 5xx is tried again instead of failing the Release after
+    # the other files went up.
+    - |
+      for file in dist/client/*.exe dist/client/*.dmg dist/client/*.zip dist/client/*.AppImage dist/client/latest*.yml; do
+        curl --fail --silent --show-error --retry 5 --retry-delay 10 --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+          --upload-file "$file" "${PACKAGE_URL}/$(basename "$file")"
+      done
+    # The Release's text: which file for which computer, a link to the hub's
+    # install page for the steps (packaging/client-release-notes.md), then the
+    # checksums. The download links point at the asset filepaths below.
+    - |
+      [ -n "${INSTALL_URL:-}" ] || { echo "INSTALL_URL is not set: the build jobs write it from TM_CLIENT_HUB_URL"; exit 1; }
+      sed -e "s|@VERSION@|${CLIENT_VERSION}|g" \
+        -e "s|@DOWNLOADS@|${CI_PROJECT_URL}/-/releases/${CI_COMMIT_TAG}/downloads|g" \
+        -e "s|@INSTALL@|${INSTALL_URL}|g" \
+        packaging/client-release-notes.md > release-notes.md
+      if grep -n '@[A-Z][A-Z]*@' release-notes.md; then echo "release-notes.md has a placeholder left"; exit 1; fi
+      {
+        printf '\n<details><summary>SHA256</summary>\n\n```\n'
+        (cd dist/client && sha256sum *.exe *.dmg *.AppImage)
+        printf '```\n\n</details>\n'
+      } >> release-notes.md
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: "Token Monitor $CLIENT_VERSION"
+    description: ./release-notes.md
+    assets:
+      links:
+        # electron-builder names them after TARGETS[].artifactName in
+        # packaging/build-client.js. Each link is named after its file: the
+        # app's updater (electron-updater's gitlab provider) finds latest*.yml
+        # and the installer by link name, reading `_` and ` ` as `-` on both
+        # sides, so older apps find the new names too. Which file fits which
+        # computer is in the description. A filepath also gives the file a
+        # fixed address: /-/releases/<tag>/downloads/windows, and the newest
+        # Release's at /-/releases/permalink/latest/downloads/windows.
+        - name: "Token-Monitor_${CLIENT_VERSION}_x64-setup.exe"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/token-monitor-client/${CLIENT_VERSION}/Token-Monitor_${CLIENT_VERSION}_x64-setup.exe"
+          filepath: /windows
+          link_type: package
+        - name: "Token-Monitor_${CLIENT_VERSION}_aarch64.dmg"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/token-monitor-client/${CLIENT_VERSION}/Token-Monitor_${CLIENT_VERSION}_aarch64.dmg"
+          filepath: /macos
+          link_type: package
+        - name: "Token-Monitor_${CLIENT_VERSION}_amd64.AppImage"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/token-monitor-client/${CLIENT_VERSION}/Token-Monitor_${CLIENT_VERSION}_amd64.AppImage"
+          filepath: /linux
+          link_type: package
+        # Listed under "Other", apart from the installers: the files the
+        # installed apps update from.
+        - name: "Token-Monitor_${CLIENT_VERSION}_aarch64.zip"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/token-monitor-client/${CLIENT_VERSION}/Token-Monitor_${CLIENT_VERSION}_aarch64.zip"
+          link_type: other
+        - name: latest.yml
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/token-monitor-client/${CLIENT_VERSION}/latest.yml"
+          link_type: other
+        - name: latest-mac.yml
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/token-monitor-client/${CLIENT_VERSION}/latest-mac.yml"
+          link_type: other
+        - name: latest-linux.yml
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/token-monitor-client/${CLIENT_VERSION}/latest-linux.yml"
+          link_type: other
+
+# The hub-deploy runner: the shell runner on the hub's own server
+# (deploy/install-runner-ubuntu.ps1 -HubDeploy). Its jobs run that server's
+# Docker, which is root there, so it is Protected: merge requests and
+# unprotected refs never reach it, and corp/v* has to be a protected tag.
+.hub:
+  tags: [hub-deploy]
+
+build:hub:
+  extends: .hub
+  stage: build
+  needs: [verify]
+  variables:
+    # build-hub-image.js checks upstream/ against its `git subtree --squash`
+    # commit, as verify does.
+    GIT_DEPTH: 0
+  rules:
+    - if: $CI_COMMIT_TAG =~ $HUB_TAG_RE
+  script:
+    # The tag's image, built here so that deploy:hub finds it in this
+    # server's Docker; the tar goes to the package registry for any other.
+    - node scripts/build-hub-image.js --ci
+    - HUB_VERSION="${CI_COMMIT_TAG#corp/v}"
+    - PACKAGE_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/token-monitor-hub/${HUB_VERSION}"
+    - |
+      for file in dist/hub/"$HUB_VERSION"/*; do
+        curl --fail --silent --show-error --retry 5 --retry-delay 10 --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+          --upload-file "$file" "${PACKAGE_URL}/$(basename "$file")"
+      done
+  artifacts:
+    name: "token-monitor-hub-$CI_COMMIT_REF_SLUG"
+    paths:
+      - dist/hub/*/RELEASE.md
+      - dist/hub/*/SHA256SUMS
+    expire_in: 90 days
+
+deploy:hub:
+  extends: .hub
+  stage: deploy
+  needs:
+    - job: verify
+    - job: build:hub
+      optional: true
+  # One deploy at a time.
+  resource_group: hub-production
+  environment:
+    name: hub/production
+    deployment_tier: production
+  variables:
+    # The release folder on the server; a project variable overrides it.
+    TM_HUB_DEPLOY_DIR: /opt/token-monitor
+  rules:
+    - if: $CI_COMMIT_TAG =~ $HUB_TAG_RE
+      when: manual
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+  # TM_HUB_ENV, a File variable of the environment hub/production, is the
+  # server's .env: it is copied for deploy/server-deploy.sh, never printed.
+  script:
+    - upstream_version="$(node -p "require('./upstream/package.json').version")"
+    - export STAGE_DIR="$(mktemp -d)"
+    - stage="token-monitor-deploy-${CI_COMMIT_SHORT_SHA}"
+    # A hub tag deploys the image build:hub made: still in this server's
+    # Docker, or else (cleaned up, or an old release deployed again) the tar
+    # in the package registry, which server-deploy.sh loads. On main, the
+    # commit's image is built here.
+    - |
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        version="${CI_COMMIT_TAG#corp/v}"
+        image="token-monitor-hub:${version}"
+        if ! docker image inspect "$image" >/dev/null 2>&1; then
+          package="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/token-monitor-hub/${version}"
+          tar="token-monitor-hub-${version}.tar"
+          (cd "$STAGE_DIR"
+            for file in "$tar" SHA256SUMS; do
+              curl --fail --silent --show-error --retry 5 --retry-delay 10 --header "JOB-TOKEN: ${CI_JOB_TOKEN}" -o "$file" "${package}/${file}"
+            done
+            sha256sum -c --ignore-missing SHA256SUMS
+            mv "$tar" "$stage.image.tar"
+            rm -f SHA256SUMS)
+        fi
+      else
+        image="token-monitor-hub:${upstream_version}-main.${CI_COMMIT_SHORT_SHA}"
+        docker build -f docker/Dockerfile -t "$image" .
+      fi
+    # The release folder, as deploy/1.token-monitor-release.ps1 makes it.
+    - git archive --format=tar -o "$STAGE_DIR/$stage.src.tar" HEAD -- . ':(exclude)api-testing'
+    - if [ -n "${TM_HUB_ENV:-}" ]; then (umask 077; cp "$TM_HUB_ENV" "$STAGE_DIR/$stage.env"); fi
+    # Backs up the database, installs the .env, keeps the running image as
+    # :previous, then `docker compose up -d` and waits for /api/health. It
+    # deletes the staged files whatever happens. A CI/CD variable must never
+    # reach its RESET_DATABASE (deletes the database without the confirmation
+    # 3.deploy-ubuntu.ps1 asks for) or SKIP_BACKUP, so both are pinned off.
+    - >
+      RESET_DATABASE=0 SKIP_BACKUP=0 bash deploy/server-deploy.sh "$CI_COMMIT_SHA" "$CI_COMMIT_REF_NAME" "$upstream_version" "$image" "$stage"
+      "$TM_HUB_DEPLOY_DIR" "$(hostname)" "GitLab CI job $CI_JOB_URL" < /dev/null
+    - rmdir "$STAGE_DIR"

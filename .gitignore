@@ -1,0 +1,22 @@
+node_modules/
+data/
+dist/
+tmp/
+# Installers from packaging/build-client.ps1: they carry the client key.
+release/
+.claude/*
+!.claude/skills/
+
+# Local hub settings: secrets, database passwords (see docs/hub.zh-TW.md).
+.env
+.env.*
+!.env.example
+!.env.client.example
+!.env.runner.example
+
+# HR announcements are real personal data; tests use synthetic workbooks.
+docs/dept/
+
+*.log
+.DS_Store
+Thumbs.db

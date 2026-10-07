@@ -1,0 +1,90 @@
+{
+  "$comment": "Seams where this repo copies, patches, loads or ports upstream code. scripts/upstream-impact.js turns the ones an upstream update hits into a checklist (docs/upstream-upgrade.zh-TW.md); it also finds every upstream('…') in the overlay and every tauri/ file that names an upstream file, so only seams those cannot see belong here. Paths in `upstream` are globs inside upstream/ (** = any depth). `watch` strings are counted in those files at both releases; a changed count is reported. Add a touchpoint whenever an upgrade turns up a seam this list missed.",
+  "touchpoints": [
+    {
+      "upstream": ["src/hub/server.js"],
+      "check": ["hub/server.js"],
+      "why": "The CLI bootstrap keeps every line of upstream's, in order; overlay steps only go between them.",
+      "verify": "node --test tests/hubOverlayBootstrap.test.js"
+    },
+    {
+      "upstream": ["src/hub/server.js", "src/hub/**"],
+      "check": ["hub/core.js", "tests/core.test.js"],
+      "why": "core.js mirrors createHub()'s getStats, getHistory, getDevices, ingest, deleteDevice and setSubscriptions. On a fingerprint failure read the new upstream function, bring core.js in line, then update UPSTREAM_FINGERPRINTS — never only the fingerprint.",
+      "verify": "node --test tests/core.test.js"
+    },
+    {
+      "upstream": ["src/hub/**", "docs/API.md"],
+      "check": ["hub/access.js", "hub/ingestGuard.js"],
+      "why": "Clients may only upload: a write route upstream adds is closed to client keys until someone decides otherwise, and every upload path goes through ingestGuard.js.",
+      "verify": "node --test tests/access.test.js tests/defects.test.js"
+    },
+    {
+      "upstream": ["src/electron/renderer/app.js", "src/electron/renderer/index.html", "src/electron/renderer/i18n.js"],
+      "check": ["packaging/build-client.js (UPSTREAM_PATCHES)"],
+      "why": "The client build rewrites these lines of upstream's renderer (device label, the GitLab releases link in every language); each must still be found exactly as often as the patch says, and a language upstream adds needs its own patch.",
+      "watch": ["settings.appUpdate.source"],
+      "verify": "node --test tests/clientBuild.test.js"
+    },
+    {
+      "upstream": ["src/electron/renderer/index.html", "src/electron/renderer/styles.css"],
+      "check": ["client/electron/main.js (titleLogoCss)"],
+      "why": "The optional title logo covers upstream's Σ mark through its CSS selectors.",
+      "verify": "node --test tests/clientBuild.test.js"
+    },
+    {
+      "upstream": ["src/electron/main.js", "src/shared/appUpdater.js", "src/shared/config.js", "src/shared/credentialStore.js", "src/electron/linuxAutostart.js", "src/electron/trayModeSettings.js"],
+      "check": ["client/electron/main.js"],
+      "why": "The company entry seeds settings.json and credentials before upstream starts, redirects upstream's release links to the GitLab Releases, drops update cache entries from outside the company feed, starts minimized at login and follows the AppImage autostart.",
+      "verify": "node --test tests/clientBuild.test.js"
+    },
+    {
+      "upstream": ["src/electron/syncDisplayStats.js", "src/electron/historySource.js", "src/electron/macWidget/history.js", "src/shared/usage.js", "src/shared/history.js", "src/shared/config.js", "src/hub/server.js"],
+      "check": ["client/electron/ownDeviceView.js", "client/electron/main.js (limitToThisDevice)"],
+      "why": "The widget shows this device only: limitToThisDevice() loads these modules through require(`../src/${id}`), which the scan cannot see, and ownDeviceView.js replaces their exports. Every hub /api/stats field must be in AGGREGATE_STATS_KEYS or PASS_THROUGH_STATS_KEYS, so a field upstream adds to getStats needs sorting there too.",
+      "verify": "node --test tests/ownDeviceView.test.js"
+    },
+    {
+      "upstream": ["package.json", "package-lock.json", "scripts/ensure-vendored-tokscale.js", "scripts/vendor/**"],
+      "check": ["packaging/build-client.js (createBuilderConfig)", "packaging/clientConfig.js", "tauri/scripts/vendor/tokscale.json"],
+      "why": "The client build starts from upstream's electron-builder block and version (TM_CLIENT_VERSION must be <upstream version>-corp.N), runs upstream's ensure-vendored-tokscale.js and resolves tar from upstream's node_modules for cross-OS builds. The Rust client bundles the same tokscale build: its pin stays a verbatim copy of upstream's (the report adds its own item when the two differ).",
+      "verify": "node --test tests/clientBuild.test.js && npm --prefix tauri run test:scripts && npm run build:client -- --platform win --dry-run (with TM_CLIENT_HUB_URL and TM_CLIENT_SECRET set)"
+    },
+    {
+      "upstream": ["eslint.config.js", "package-lock.json"],
+      "check": ["eslint.config.js", "package.json (devDependencies)"],
+      "why": "The overlay lints with upstream's config; its eslint plugins are pinned to the versions upstream's lockfile resolves.",
+      "verify": "npm run lint"
+    },
+    {
+      "upstream": ["src/hub/**", "src/shared/**", "package.json"],
+      "check": ["docker/Dockerfile"],
+      "why": "The hub image copies only upstream/package.json, src/shared and src/hub; a new runtime dependency or directory has to be added there.",
+      "verify": "node --test tests/upstream.test.js tests/docker.test.js && docker build -f docker/Dockerfile ."
+    },
+    {
+      "upstream": ["src/shared/usage.js", "src/shared/syncPayload.js", "src/shared/history.js", "src/shared/sessionMetadata.js", "src/shared/dailyHistoryArchive.js", "src/shared/usage/**", "src/shared/archiveHelpers.js", "src/shared/hashKey.js", "src/shared/limits/**", "src/shared/providers/**", "docs/API.md"],
+      "check": ["tauri/src-tauri/src/wire/", "tauri/src-tauri/src/usage/", "tauri/src-tauri/src/hub/payload.rs", "tauri/src-tauri/src/limits/"],
+      "why": "The Rust client's upload must match upstream's field for field (tauri/docs/architecture.md, module map); limits account keys must hash the same.",
+      "verify": "npm --prefix tauri run test:compat"
+    },
+    {
+      "upstream": ["src/shared/sessionDetail.js", "src/shared/sessionFiles.js"],
+      "check": ["tauri/src-tauri/src/session_detail.rs"],
+      "why": "Session detail is compared field by field with upstream's readSessionDetail.",
+      "verify": "npm --prefix tauri run test:compat"
+    },
+    {
+      "upstream": ["src/shared/clientCatalog.js", "src/shared/tokscaleClientMapping.js"],
+      "check": ["tauri/src-tauri/src/usage/client_name.rs", "tauri/src-tauri/src/settings.rs (SUPPORTED_CLIENTS)"],
+      "why": "Client ids are partition keys; a new or renamed upstream client needs the same normalisation in Rust.",
+      "verify": "npm --prefix tauri run test:rust"
+    },
+    {
+      "upstream": ["src/shared/collector.js", "src/shared/providers/cursor/**", "src/shared/providers/antigravity/**", "src/shared/selfSyncThrottle.js"],
+      "check": ["tauri/src-tauri/src/collector/", "tauri/src-tauri/src/tokscale/"],
+      "why": "The Rust collector ports upstream's scan order, self-sync throttling and the tokscale fallbacks.",
+      "verify": "npm --prefix tauri run test:rust"
+    }
+  ]
+}

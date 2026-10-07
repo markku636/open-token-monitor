@@ -1,0 +1,32 @@
+meta {
+  name: Ingest - client key accepted
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/ingest
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{clientKey}}
+}
+
+body:json {
+  {}
+}
+
+docs {
+  An empty body passes authentication and then fails validation, so nothing is
+  written except one "rejected" row in token_monitor.ingest_events.
+  400 deviceId_required = the key is accepted. 401 unauthorized = wrong key.
+}
+
+tests {
+  test("client key is accepted (400, not 401)", function() {
+    expect(res.getStatus(), "401 means the key does not match TOKEN_MONITOR_CLIENT_SECRETS").to.equal(400);
+    expect(res.getBody().error).to.equal("deviceId_required");
+  });
+}

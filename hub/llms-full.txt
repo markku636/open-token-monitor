@@ -1,0 +1,256 @@
+# Token Monitor hub API — full reference
+
+> Read-only HTTP API of this company's Token Monitor hub. Employees' computers run the Token Monitor client, which uploads how many tokens their AI coding tools (Claude Code, Codex, Gemini CLI, …) used each day. The hub charges each day to whoever owned the device that day, places people in the org tree from the HR lists, and serves the figures here. Base URL: {{origin}}
+
+Machine-readable spec: {{origin}}/api/reports/v1/openapi.json (OpenAPI 3.1). Short index: {{origin}}/llms.txt.
+
+## Authentication
+
+- Send `Authorization: Bearer <API token>` on every request. A token looks like `tmk_<8 hex>_<40 hex>`; the first 8 hex digits are its id on the dashboard.
+- A hub admin makes the token on the dashboard (section "API token"), one per system, optionally with an expiry. It is shown only once: keep it in your system's secret store. Revoked or expired tokens get 401 at once.
+- Each token has one or more scopes, picked when it is made:
+
+| Scope | Routes |
+|---|---|
+| `reports:read` | `usage/monthly`, `usage/daily`, `usage/weekly`, `devices`, `accounts` |
+| `analytics:read` | `units`, `employees`, `limits`, `usage/analysis` |
+
+- A route the token has no scope for answers 403 `forbidden`. Tokens can only read: every other route of the hub answers 403.
+- The admin key (`TOKEN_MONITOR_SECRET`) also works, for scripts run by the hub's admins.
+
+## Conventions
+
+- Every route is `GET`, under `{{origin}}/api/reports/v1/`. Answers are JSON (`application/json; charset=utf-8`; larger ones gzip-compressed when you send `Accept-Encoding: gzip`) with `Access-Control-Allow-Origin: *`.
+- CSV: add `format=csv` (or send `Accept: text/csv`) on every route but `usage/analysis`. The CSV is UTF-8 with a BOM, so Excel opens it as it is; the columns are the JSON fields of one row.
+- Errors: `{ "error": "<stable code>", "message": "<for people>" }`, with the HTTP status below. Branch on `error`, not on `message`.
+- Money: `costUsd` is what the tokens would cost at each vendor's **API list prices**, in USD (`"costBasis": "api-list-price-equivalent"`, `"currency": "USD"`). It is **not** an invoice: people on subscription plans (Claude Max, ChatGPT Plus, …) pay a monthly fee. Licence and subscription costs come from your own records.
+- Days are the **device's local day**. `from` and `to` are `YYYY-MM-DD` and include both ends; months are `YYYY-MM`. Defaults that say "today" or "this month" use UTC.
+- Org tree: company → BU → department → team. A `unitId` is the path of names, e.g. `CO/BU1/RND`; `path` is the same names joined by `/`. A unit with no BU sits right under its company (its id has `-` in the BU's place).
+- Ownership has history: a device that changed hands mid-period is charged to each owner (and unit) for their own days.
+- "Other": usage in no unit of the level asked for (for example, by BU: a department in no BU) and usage on devices nobody owns is one row with `key: null`, `label: "其他"`, `other: true`, last.
+- Months older than the hub's daily history fall back to monthly totals, charged to whoever owned the device on the 1st. After an admin deletes history, earlier months are simply empty.
+- Names: `analytics:read` routes give employees' English names only (the part of the email before `@` when there is none). The `reports:read` routes give the HR list's full name.
+- Versioning: v1 only ever gains fields and routes. Ignore fields you do not know. An incompatible change would come as `/api/reports/v2/`.
+
+## GET /api/reports/v1/usage/monthly
+
+Scope `reports:read`. One month's usage, grouped.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `month` | this month (UTC) | `YYYY-MM` |
+| `groupBy` | `department` | `company`, `bu`, `department`, `team` (each day's usage rolled up from its owner's unit to that level), `unit` (the owner's unit itself), `employee`, `client` (tool, e.g. `claude`, `codex`), `model` (e.g. `claude-sonnet-4-5`) or `device` |
+| `unitId` | — | only that unit and every unit under it |
+| `employeeId` | — | only that employee (HR employee no.) |
+| `deviceId` | — | only that device |
+| `format` | json | `csv` |
+
+```json
+{
+  "ok": true,
+  "month": "2026-09",
+  "groupBy": "department",
+  "currency": "USD",
+  "costBasis": "api-list-price-equivalent",
+  "generatedAt": "2026-10-01T01:00:00.000Z",
+  "totals": { "tokens": 870000, "costUsd": 94.2 },
+  "rows": [
+    { "key": "CO/BU1/RND", "label": "RND", "path": "CO/BU1/RND", "costCenter": "CC-200", "other": false, "tokens": 798000, "costUsd": 85.8, "devices": 2 },
+    { "key": null, "label": "其他", "path": null, "costCenter": null, "other": true, "tokens": 72000, "costUsd": 8.4, "devices": 1 }
+  ]
+}
+```
+
+- Rows grouped by an org level or `unit` also have `path` and `costCenter`; `groupBy=employee` rows have `email`.
+- `devices`: devices with usage in that row. A device that changed units counts in each of its rows.
+- Rows are sorted by cost, "other" last.
+
+## GET /api/reports/v1/usage/daily
+
+Scope `reports:read`. The same rows per day: each row also has `date`.
+
+- `from`, `to`: `YYYY-MM-DD`; default the last 30 days ending today (UTC). At most 400 days per request (400 `range_too_long`).
+- `groupBy`, `unitId`, `employeeId`, `deviceId`, `format`: as for `usage/monthly`.
+
+## GET /api/reports/v1/usage/weekly
+
+Scope `reports:read`. The same rows per ISO week (Monday–Sunday): each row has `week`, that week's Monday.
+
+- `from`, `to`: the range grows to whole weeks; the answer's `from` and `to` are the grown ones. Default: the last 12 weeks. At most 400 days.
+- `devices` is the number of devices with usage in that week, each counted once.
+- Other parameters as for `usage/monthly`.
+
+## GET /api/reports/v1/devices
+
+Scope `reports:read`. Every device (not deleted) and who it belongs to today.
+
+`{ "ok": true, "generatedAt": "…", "devices": [ … ] }`, each with `deviceId`, `hostname`, `platform`, `osName`, `osVersion`, `agentVersion`, `agentRuntime`, `lastSeenAt` (last upload), `firstSeenAt`, `employeeId`, `employeeName`, `employeeEmail`, `unitId`, `unitName`, `costCenter`. Parameter: `format`.
+
+## GET /api/reports/v1/accounts
+
+Scope `reports:read`. The AI accounts and plans each device reported, for reconciling with the licence list.
+
+`{ "ok": true, "generatedAt": "…", "accounts": [ … ] }`, each with `provider` (e.g. `claude`, `codex`), `accountEmail`, `accountName`, `accountLabel`, `planLabel`, `status`, `updatedAt`, `deviceId`, `hostname`, `employeeId`, `employeeName`, `unitId`, `unitName`. Parameter: `format`. Quota windows are in `limits`.
+
+## GET /api/reports/v1/units
+
+Scope `analytics:read`. The org tree: every unit, inactive ones too.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `active` | both | `true`: only units on the latest HR lists; `false`: only retired ones |
+| `format` | json | `csv` |
+
+```json
+{
+  "ok": true,
+  "generatedAt": "2026-10-05T08:00:00.000Z",
+  "units": [
+    { "unitId": "CO", "name": "CO", "level": "company", "parentUnitId": null, "path": "CO", "costCenter": null, "active": true,
+      "headcount": 120, "ownHeadcount": 3, "devices": 95, "tokensLast30Days": 41000000, "costUsdLast30Days": 5230.5 },
+    { "unitId": "CO/BU1/RND", "name": "RND", "level": "department", "parentUnitId": "CO/BU1", "path": "CO/BU1/RND", "costCenter": "CC-200", "active": true,
+      "headcount": 18, "ownHeadcount": 12, "devices": 16, "tokensLast30Days": 9800000, "costUsdLast30Days": 1204.25 }
+  ]
+}
+```
+
+- `level`: `company`, `bu`, `department` or `team`. `parentUnitId` is null for a company.
+- `headcount`: active employees in the unit and every unit under it; `ownHeadcount`: placed in the unit itself.
+- `devices`: devices charged to the unit and every unit under it today.
+- `tokensLast30Days`, `costUsdLast30Days`: the unit and everything under it, the last 30 days, each day as it was charged.
+- `active: false`: the latest HR list no longer has the unit. Old usage may still be charged to it, so keep it for history.
+
+## GET /api/reports/v1/employees
+
+Scope `analytics:read`. Everyone the HR lists ever had.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `unitId` | — | only people placed in that unit or under it (404 `unknown_unit` if it does not exist) |
+| `active` | both | `true`: on the latest HR list; `false`: no longer on it |
+| `format` | json | `csv` |
+
+`{ "ok": true, "generatedAt": "…", "employees": [ … ] }`, each with:
+
+- `employeeId` (HR employee no.), `name` (English name), `email` (lower-case), `active`, `companyId`
+- `unitId`, `path`: where the latest HR list placed them; `effectiveFrom`: since when
+- `devices`: devices charged to them today
+- `tokensLast30Days`, `costUsdLast30Days`, `updatedAt`
+
+## GET /api/reports/v1/limits
+
+Scope `analytics:read`. Each AI account on each device, as the device last reported it, with its quota windows. Providers a device has not set up (`notConfigured`, `disabled`) are left out.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `provider` | — | e.g. `claude`, `codex` |
+| `deviceId`, `employeeId` | — | filters (the owner today) |
+| `unitId` | — | the owner's unit today, or under it |
+| `format` | json | `csv`: one line per window (`windowKind`, `windowLabel`, `usedPercent`, `remainingPercent`, `used`, `limit`, `remaining`, `resetsAt`, `windowMinutes`); an account without windows is one line with those empty |
+
+```json
+{
+  "ok": true,
+  "generatedAt": "2026-10-05T08:00:00.000Z",
+  "accounts": [
+    {
+      "provider": "claude", "accountEmail": "dev@example.com", "accountName": null, "accountLabel": null,
+      "planLabel": "Max", "workspaceKind": null, "status": "ok", "source": "oauth", "balanceUsd": null,
+      "windows": [
+        { "kind": "session", "label": "5-hour", "metric": null, "usedPercent": 42, "remainingPercent": 58, "used": null, "limit": null, "remaining": null, "currency": null, "resetsAt": "2026-10-05T10:00:00.000Z", "windowMinutes": 300 },
+        { "kind": "weekly", "label": "Weekly", "metric": null, "usedPercent": 63, "remainingPercent": 37, "used": null, "limit": null, "remaining": null, "currency": null, "resetsAt": "2026-10-09T00:00:00.000Z", "windowMinutes": 10080 }
+      ],
+      "updatedAt": "2026-10-05T07:58:00.000Z", "receivedAt": "2026-10-05T07:59:10.000Z",
+      "deviceId": "dev-laptop-1", "hostname": "DEV-LAPTOP-1", "employeeId": "E001", "employeeName": "David Chen", "unitId": "CO/BU1/RND", "unitName": "RND"
+    }
+  ]
+}
+```
+
+- One account can appear on several devices: each device reports its own view. Group by `provider` + `accountEmail` to list accounts once; take the latest `updatedAt`.
+- `status`: `ok`, `unauthorized`, `rateLimited`, `sourceRateLimited`, `unavailable` or `error` (the device could not read the account just then; its last windows may be missing). `source`: how the device read it (`oauth`, `cli`, `web`, `rpc`, `local`, `api`).
+- `windows[].kind`: `session` (e.g. Claude's 5-hour window), `daily`, `weekly` or `billing` (a billing cycle or month). `usedPercent` is 0–100 (null when the provider gives no percentage). `resetsAt` is when the window starts over. `balanceUsd` is prepaid credit left, when the provider reports one.
+- The figures are as fresh as the device's last upload (`receivedAt`, every 30 minutes while it runs).
+
+## GET /api/reports/v1/usage/analysis
+
+Scope `analytics:read`. What the dashboard shows for a unit (or every company, or one person): the range cut into periods, a **focus** set against a **comparison window**, and the scope's units, "other", models, tools, token kinds, people, devices and AI accounts. JSON only.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `from`, `to` | the last 7 days ending today (UTC) | the range, at most 400 days |
+| `granularity` | `day` | `day`, `week` (ISO weeks, Monday first) or `month`: how the range is cut into `periods` |
+| `focus` | `last` | `last`: the last period; `range`: the whole range |
+| `compare` | `previous` | `previous`: for `focus=last` the same stretch of the period before (a day: the same weekday a week earlier; a week two days old: the first two days of last week), for `focus=range` the same number of days right before; `year`: a year back (52 weeks for days and weeks, the same dates for months and ranges); `custom`: `compareFrom`–`compareTo` |
+| `compareFrom`, `compareTo` | — | `compare=custom`: at most 400 days, ending by today, sharing no day with the focus |
+| `unitId` | every company | the scope: that unit and everything under it (404 `unknown_unit`) |
+| `level` | first level below the scope with a unit | the level of `units` (`company`, `bu`, `department`, `team`), below the scope (400 `bad_level`) |
+| `employeeId` | — | one person's view: their usage wherever it was charged; `unitId` and `level` are ignored (404 `unknown_employee`) |
+| `client` | — | only that tool, e.g. `claude`; `models` is then empty (model usage does not record the tool) |
+
+Answer (fields marked * are absent or empty in one person's view):
+
+- `from`, `to`, `granularity`, `currency`, `costBasis`, `generatedAt`
+- `periods`: `[{ period, from, to, days }]` — `period` is `YYYY-MM-DD` for a day or a week (its Monday), `YYYY-MM` for a month. The first and last can be clipped to the range.
+- `focus`: `{ period, from, to, days }` — the last period, or `period: "range"` for `focus=range`
+- `comparison`: `{ mode, from, to, days, partial }` — `partial`: not a whole period
+- `scope`: `{ unitId, name, level, path }` or null (every company); `employee`: `{ employeeId, name, email, active, unit }` in one person's view, else null
+- `client`, `level`, `levels` (the levels that can be compared under the scope), `headcount` (active employees on the HR lists in the scope)
+- `dataFrom`: `{ daily, monthly }` — the first day with daily data and the first month with monthly totals, hub-wide; `collectingFrom`: the day the hub first saw a device; `purgedBefore`: usage before this day was deleted; `monthlyFallback`: months of a month view counted from monthly totals
+- `totals` (the whole range), `focusTotals` (the focus; also `unownedDevices`), `comparisonTotals`: `{ tokens, costUsd, devices, employees, activeDays }`
+- `trend`: `[{ period, tokens, costUsd, devices, employees }]`, one per period
+- `units`*: each unit of `level` in the scope: `{ unitId, name, path, active, headcount, focus, comparison, trend, clients }`, most tokens in the focus first. `clients` (not with `client=`): `[{ client, focus: { tokens, costUsd }, comparison: { tokens, costUsd } }]`
+- `other`: `{ focus, comparison, trend, clients }` — what in the scope is in no unit of `level`
+- `models`, `clients`: `[{ model | client, focus: { tokens, costUsd }, comparison, trend }]` — those used in the focus first, then those used only elsewhere in the range or in the comparison window (focus zero)
+- `composition`: the focus's tokens by kind, `{ total, covered, input, output, cacheRead, cacheWrite, unclassified }` — only `covered` tokens have a known split
+- `employees`: `[{ employeeId, name, email, other, unit, focus, comparison, trend, clients }]` — everyone with usage in the range or the comparison window, plus one `other: true` row (`employeeId: null`) for usage nobody is charged with
+- `unownedDevices` (scope view) or `devices` (one person's view, with `trend`): `[{ deviceId, hostname, deleted, focus, comparison }]`
+- `accounts`*: each AI account's usage, `{ account, holders, shared, other, providers, unit, devices: [{ deviceId, hostname }], tools: [{ client, tokens, costUsd }], focus, comparison }` — a tool's tokens on a device go to the account the device last reported for that tool's provider; two or more there are one `shared` entry (`account` joined by ` + `); none is `other` (`account: null`)
+- `active`*: `{ employees: [{ employeeId, name, unit, focus }], devices: [{ deviceId, hostname, deleted, employee: { employeeId, name }, unit, focus }] }` — who and what had usage in the focus
+- `unit` everywhere is `{ unitId, name, path }` or null. People's `focus`/`comparison` are `{ tokens, costUsd, devices, activeDays }`; units' are `{ tokens, costUsd, devices, employees }`; devices' are `{ tokens, costUsd, activeDays }`.
+
+Load: answers are worked out on demand and cached for about a minute per question. When the hub is busy, the answer is 503 `usage_busy` with `Retry-After` (seconds); a query past 15 s is 503 `usage_slow` — ask for a shorter range or a smaller unit. Prefer `usage/daily` for bulk exports.
+
+## Errors
+
+| Status | `error` | When |
+|---|---|---|
+| 400 | `bad_month`, `bad_range`, `range_too_long`, `bad_group`, `bad_active` | a parameter is wrong |
+| 400 | `bad_granularity`, `bad_focus`, `bad_compare`, `bad_level`, `bad_employee`, `bad_client` | `usage/analysis` parameters |
+| 401 | `unauthorized` | no token, a wrong one, revoked or expired |
+| 403 | `forbidden` | the token lacks the route's scope |
+| 404 | `unknown_unit`, `unknown_employee` | `unitId` / `employeeId` names nothing |
+| 404 | `not_found` | no such route |
+| 503 | `store_unavailable` | the hub runs without a database |
+| 503 | `usage_busy` (with `Retry-After`), `usage_slow` | `usage/analysis` only |
+
+## Recommended pulling
+
+- Daily, early morning: yesterday's `usage/daily`. Mondays: last week's `usage/weekly`. On the 1st: last month's `usage/monthly`, once per `groupBy` you need.
+- Devices upload late when they were offline, so re-pull last month on the 3rd–5th and keep the latest answer.
+- `units` and `employees` change when HR lists are imported (monthly); once a day is plenty. `limits` follows the devices' uploads (every 30 minutes).
+
+## Examples
+
+```bash
+curl -s -H "Authorization: Bearer $TM_TOKEN" "{{origin}}/api/reports/v1/usage/monthly?month=2026-09&groupBy=department"
+curl -s -H "Authorization: Bearer $TM_TOKEN" -o units.csv "{{origin}}/api/reports/v1/units?format=csv"
+curl -s -H "Authorization: Bearer $TM_TOKEN" "{{origin}}/api/reports/v1/usage/analysis?granularity=week&from=2026-08-03&to=2026-09-27&focus=range&compare=year&level=department"
+```
+
+```js
+const response = await fetch(`{{origin}}/api/reports/v1/usage/daily?from=2026-09-01&to=2026-09-30&groupBy=employee`, {
+  headers: { authorization: `Bearer ${process.env.TM_TOKEN}` }
+});
+if (!response.ok) throw new Error((await response.json()).error);
+const { rows } = await response.json();
+```
+
+```python
+import os, requests
+r = requests.get("{{origin}}/api/reports/v1/limits", params={"provider": "claude"},
+                 headers={"Authorization": f"Bearer {os.environ['TM_TOKEN']}"}, timeout=30)
+r.raise_for_status()
+for account in r.json()["accounts"]:
+    print(account["accountEmail"], [(w["label"], w["usedPercent"]) for w in account["windows"]])
+```

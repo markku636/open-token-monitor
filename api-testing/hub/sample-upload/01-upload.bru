@@ -1,0 +1,113 @@
+meta {
+  name: Upload - bruno-test device
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/ingest
+  body: json
+  auth: bearer
+}
+
+headers {
+  x-token-monitor-response: minimal
+}
+
+auth:bearer {
+  token: {{clientKey}}
+}
+
+body:json {
+  {
+    "deviceId": "{{sampleDeviceId}}",
+    "hostname": "bruno-test",
+    "platform": "win32",
+    "agentVersion": "bruno",
+    "agentRuntime": "electron-widget",
+    "updatedAt": "{{nowIso}}",
+    "syncUploadIntervalMs": 0,
+    "projectsEnabled": false,
+    "today": {
+      "totalTokens": 12345,
+      "costUsd": 0.12,
+      "cacheReadTokens": 7400,
+      "cacheWriteTokens": 1200,
+      "outputTokens": 600,
+      "unclassifiedTokens": 0,
+      "clients": { "claude": 12345 },
+      "clientCosts": { "claude": 0.12 },
+      "models": { "claude-sonnet-4-5": 12345 },
+      "modelCosts": { "claude-sonnet-4-5": 0.12 },
+      "clientModels": { "claude": { "claude-sonnet-4-5": 12345 } },
+      "clientModelCosts": { "claude": { "claude-sonnet-4-5": 0.12 } }
+    },
+    "month": {
+      "totalTokens": 12345,
+      "costUsd": 0.12,
+      "clients": { "claude": 12345 },
+      "clientCosts": { "claude": 0.12 },
+      "models": { "claude-sonnet-4-5": 12345 },
+      "modelCosts": { "claude-sonnet-4-5": 0.12 },
+      "clientModels": { "claude": { "claude-sonnet-4-5": 12345 } },
+      "clientModelCosts": { "claude": { "claude-sonnet-4-5": 0.12 } }
+    },
+    "allTime": { "totalTokens": 12345, "costUsd": 0.12 },
+    "periodWindows": {
+      "timeZone": "Asia/Taipei",
+      "today": { "key": "{{todayKey}}", "endsAt": "{{todayEndsAt}}" },
+      "month": { "key": "{{monthKey}}", "endsAt": "{{monthEndsAt}}" }
+    },
+    "historyAvailable": true,
+    "history": {
+      "daily": [
+        {
+          "date": "{{todayKey}}",
+          "tokens": 12345,
+          "cost": 0.12,
+          "messages": 6,
+          "cacheReadTokens": 7400,
+          "cacheWriteTokens": 1200,
+          "outputTokens": 600,
+          "unclassifiedTokens": 0,
+          "tokenComponentsAvailable": true,
+          "perClient": { "claude": { "tokens": 12345, "cost": 0.12, "messages": 6, "unclassifiedTokens": 0 } },
+          "perModel": { "claude-sonnet-4-5": { "tokens": 12345, "cost": 0.12, "unclassifiedTokens": 0 } }
+        }
+      ],
+      "monthly": [
+        {
+          "month": "{{monthKey}}",
+          "tokens": 12345,
+          "cost": 0.12,
+          "perClient": { "claude": { "tokens": 12345, "cost": 0.12, "messages": 6, "unclassifiedTokens": 0 } },
+          "perModel": { "claude-sonnet-4-5": { "tokens": 12345, "cost": 0.12, "unclassifiedTokens": 0 } }
+        }
+      ]
+    }
+  }
+}
+
+script:pre-request {
+  // Asia/Taipei (UTC+8, no DST): today's key and when today and this month end.
+  const TZ_MS = 8 * 60 * 60 * 1000;
+  const local = new Date(Date.now() + TZ_MS);
+  const y = local.getUTCFullYear();
+  const m = local.getUTCMonth();
+  const d = local.getUTCDate();
+  const todayKey = local.toISOString().slice(0, 10);
+  bru.setVar("sampleDeviceId", "bruno-test");
+  bru.setVar("nowIso", new Date().toISOString());
+  bru.setVar("todayKey", todayKey);
+  bru.setVar("monthKey", todayKey.slice(0, 7));
+  bru.setVar("todayEndsAt", new Date(Date.UTC(y, m, d + 1) - TZ_MS).toISOString());
+  bru.setVar("monthEndsAt", new Date(Date.UTC(y, m + 1, 1) - TZ_MS).toISOString());
+}
+
+tests {
+  test("upload accepted", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().ok).to.equal(true);
+    expect(res.getBody().deviceId).to.equal("bruno-test");
+  });
+}

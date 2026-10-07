@@ -1,0 +1,37 @@
+# BuildKit reads this file instead of a root .dockerignore because it sits next
+# to the Dockerfile it is named after. Paths are relative to the repository
+# root, the build context. The image copies only package.json,
+# package-lock.json, upstream.js, hub/ and three paths of upstream/ (see
+# Dockerfile); keeping the context that small keeps `docker build` off the rest
+# of the tree, and keeps local data and secrets out of it.
+.git
+node_modules
+data
+dist
+tmp
+docs
+tests
+scripts
+docker
+deploy
+*.md
+*.ps1
+# In a release folder (deploy/release.ps1): database dumps and its notes.
+backups
+RELEASE-INFO.txt
+
+# Of upstream/, only what the hub runs.
+upstream/*
+!upstream/package.json
+!upstream/src
+upstream/src/*
+!upstream/src/shared
+!upstream/src/hub
+
+# Local hub secrets never belong in an image layer.
+.env
+.env.*
+
+*.log
+.DS_Store
+Thumbs.db

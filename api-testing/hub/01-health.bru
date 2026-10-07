@@ -1,0 +1,26 @@
+meta {
+  name: Health
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/health
+  body: none
+  auth: none
+}
+
+tests {
+  test("hub answers", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().ok).to.equal(true);
+  });
+
+  test("hub requires a key", function() {
+    expect(res.getBody().secretRequired).to.equal(true);
+  });
+
+  test("devices have uploaded (deviceCount > 0)", function() {
+    expect(res.getBody().deviceCount).to.be.above(0);
+  });
+}

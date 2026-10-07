@@ -1,0 +1,26 @@
+meta {
+  name: Ingest - wrong key rejected
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/ingest
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: not-a-real-key
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("wrong key gets 401", function() {
+    expect(res.getStatus()).to.equal(401);
+    expect(res.getBody().error).to.equal("unauthorized");
+  });
+}
