@@ -111,6 +111,15 @@ fn now_iso() -> String {
     crate::wire::time::iso_millis(chrono::Utc::now())
 }
 
+/// 探測失敗、沒有上一次成功的數字時發佈的狀態列。上游 Antigravity 的 fetcher 失敗時自己回這一列
+/// （`source` 是 `rpc`），其他 provider 是 collector 補的空白列。
+fn failed_row(provider: &str, status: ProviderStatus) -> LimitProvider {
+    match provider {
+        "antigravity" => super::antigravity::error_row(status, now_iso()),
+        _ => LimitProvider::status_row(provider, status, now_iso()),
+    }
+}
+
 /// 上游 retryPolicy：`cap = min(300 秒, 5 秒 × 2^(n-1))`，延遲在 cap/2 到 cap 之間。
 pub fn backoff(attempt: u32, seed: u128) -> Duration {
     let exp = attempt.saturating_sub(1).min(16);
@@ -156,6 +165,8 @@ impl LimitsRuntime {
                 }
                 "codex" => codex::probe(&self.http, &CodexEnv::from_process()).await,
                 "copilot" => super::copilot::probe(&self.http).await,
+                // 本機 RPC，自己帶 8 秒的期限與只連 127.0.0.1 的 client。
+                "antigravity" => super::antigravity::probe().await,
                 "cursor" => match dirs::home_dir() {
                     Some(home) => super::cursor::probe(&self.http, &home).await,
                     None => Err(ProbeError::new(
@@ -194,11 +205,11 @@ impl LimitsRuntime {
                     status: e.status,
                     ..good.clone()
                 },
-                None => LimitProvider::status_row(provider, e.status, now_iso()),
+                None => failed_row(provider, e.status),
             },
             Err(e) => {
                 self.last_good.remove(provider);
-                LimitProvider::status_row(provider, e.status, now_iso())
+                failed_row(provider, e.status)
             }
         }
     }
@@ -304,6 +315,31 @@ mod tests {
             row.windows.is_empty(),
             "nothing to fall back on after a terminal failure"
         );
+    }
+
+    #[test]
+    fn antigravity_failures_keep_the_rpc_source() {
+        let mut rt = LimitsRuntime::new(LimitsConfig {
+            providers: vec!["antigravity".into()],
+            refresh_ms: 300_000,
+        });
+        let row = rt.apply(
+            "antigravity",
+            Err(ProbeError::new(
+                ProviderStatus::NotConfigured,
+                "not running",
+            )),
+        );
+        assert_eq!(
+            (row.status, row.source.as_str()),
+            (ProviderStatus::NotConfigured, "rpc")
+        );
+        assert!(row.account_key.is_empty() && row.windows.is_empty());
+        let row = rt.apply(
+            "claude",
+            Err(ProbeError::new(ProviderStatus::NotConfigured, "no login")),
+        );
+        assert_eq!(row.source, "", "other providers keep the blank row");
     }
 
     #[test]

@@ -133,6 +133,7 @@ fn provider_label(id: &str) -> &str {
     match id {
         "claude" => "Claude",
         "codex" => "Codex",
+        "antigravity" => "Antigravity",
         other => other,
     }
 }

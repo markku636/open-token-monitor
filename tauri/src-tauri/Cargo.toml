@@ -83,8 +83,19 @@ keyring = { version = "3", features = ["windows-native"] }
 # osName / osVersion：讀 HKLM\...\Windows NT\CurrentVersion（對齊上游 src/shared/osVersion.js）。
 winreg = "0.55"
 # 工作列上方重新置頂（gui/taskbar.rs）與圓角（gui/chrome.rs）：SetWindowPos、前景事件 hook、
-# DwmSetWindowAttribute。與 tao / tauri 同一個版本與 feature 集合，沒有多編譯任何東西。
-windows = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
+# DwmSetWindowAttribute。與 tao / tauri 同一個版本，不另外編一份。
+# 核心也用（所以不是 optional）：Antigravity 額度探測列程序命令列與監聽的 port（limits/antigravity_os.rs：
+# ToolHelp、NtQueryInformationProcess、GetExtendedTcpTable），取代上游每次啟動 PowerShell 查 WMI。
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_UI_Accessibility",
+  "Win32_UI_WindowsAndMessaging",
+  "Wdk_System_Threading",
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Threading",
+] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
@@ -105,7 +116,6 @@ gui = [
   "dep:tauri-plugin-window-state",
   "dep:tauri-plugin-autostart",
   "dep:tauri-plugin-opener",
-  "dep:windows",
   "dep:tauri-plugin-global-shortcut",
   "dep:tauri-plugin-dialog",
   "dep:tauri-plugin-updater",

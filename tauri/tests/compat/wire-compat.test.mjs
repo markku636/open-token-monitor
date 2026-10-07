@@ -11,7 +11,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { CUSTOM, REPO, root } from "./repos.mjs";
@@ -444,6 +446,85 @@ test("limits: GitHub Copilot usage maps exactly like upstream", { skip }, () => 
   assertSame(ours.windows, theirs.windows, "copilot windows");
   for (const key of ["accountKey", "accountLabel", "accountName", "status", "source"]) {
     assert.equal(ours[key], theirs[key], `copilot ${key}`);
+  }
+});
+
+// 上游 tests/shared/antigravityProbe.test.js 的 fakeSpawn：讓上游的 `ps` 路徑解析固定的命令列。
+function fakeSpawn(stdout) {
+  return () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setImmediate(() => {
+      child.stdout.emit("data", Buffer.from(stdout));
+      child.emit("close", 0);
+    });
+    return child;
+  };
+}
+
+// 每個情境都讓上游真正的 probe（程序分類、端點預檢、來源排程、分組額度、舊版模型池、錯誤分類）與
+// fetchAntigravityLimits 的對應跑一次。上游的 callLs 真的打本機 HTTP 伺服器，伺服器照情境回每個 RPC 的
+// 狀態碼與內容（沒寫的回 404），所以錯誤分類（401/403/429、提到 CSRF 的 400）也在比對範圍內。
+test("limits: Antigravity language-server RPC maps exactly like upstream", { skip }, async () => {
+  const bin = agentBin();
+  const dir = path.join(root, "src-tauri", "tests", "fixtures", "limits");
+  const res = spawnSync(bin, ["limits", "--replay", dir], { encoding: "utf8" });
+  assert.equal(res.status, 0, res.stderr);
+  const ours = JSON.parse(res.stdout).providers.filter((p) => p.provider === "antigravity");
+  const scenarios = JSON.parse(fs.readFileSync(path.join(dir, "antigravity-usage.json"), "utf8"));
+  assert.equal(ours.length, scenarios.length, "one row per scenario");
+  const core = up("limits/core.js");
+  const { errorWithStatus } = up("limits/providerHelpers.js");
+  const probe = require(path.join(REPO, "src", "shared", "providers", "antigravity", "probe.js"));
+  const { fetchAntigravityLimits } = require(path.join(REPO, "src", "shared", "providers", "antigravity", "limits.js"));
+
+  let current = null;
+  const server = http.createServer((req, res) => {
+    const method = req.url.split("/").pop();
+    const entry = current.rpc?.[method] ?? { status: 404, body: "404 page not found" };
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(entry.status ?? 200, { "content-type": "application/json" });
+      res.end(typeof entry.body === "string" ? entry.body : JSON.stringify(entry.body ?? {}));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  try {
+    for (const [i, scenario] of scenarios.entries()) {
+      current = scenario;
+      const row = await fetchAntigravityLimits(
+        {},
+        {
+          now: () => Date.parse("2026-01-01T00:00:00.000Z"),
+          detectProcessInfos: () =>
+            probe.detectProcessInfos({ platform: "linux", spawn: fakeSpawn(scenario.processes.join("\n")) }),
+          listeningPorts: async () => {
+            if (scenario.portsError) throw errorWithStatus("unavailable", scenario.portsError);
+            if (!scenario.ports?.length) throw errorWithStatus("unavailable", "no listening ports for antigravity LS");
+            return scenario.ports;
+          },
+          // 候選端點（https / http、各個 port）照上游的排程走，實際都送到這台假伺服器。
+          callLs: (args) => probe.callLs({ ...args, scheme: "http", host: "127.0.0.1", port }),
+        },
+      );
+      assertSame(ours[i], plain(core.normalizeLimitProvider(row)), `antigravity: ${scenario.name}`);
+    }
+  } finally {
+    server.close();
+  }
+  const ok = ours.filter((p) => p.status === "ok");
+  assert.ok(ok.length >= 5, "most scenarios produce quota");
+  assert.deepEqual(
+    [...new Set(ok.map((p) => p.sourceDetail))].sort(),
+    ["app", "cli", "ide"],
+    "every source kind is covered",
+  );
+  for (const row of ours) {
+    assertSame(row, plain(core.normalizeLimitProvider(row)), "antigravity row is a fixed point of upstream normalization");
   }
 });
 

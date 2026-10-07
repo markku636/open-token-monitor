@@ -75,6 +75,7 @@ export const EN: Record<string, string> = {
   "每月": "Monthly",
   "每週（全部模型）": "Weekly (all models)",
   "這台電腦沒有登入 {name}": "{name} is not signed in on this PC",
+  "Antigravity 沒有在執行；開啟 Antigravity 或 agy 後才讀得到額度": "Antigravity isn't running; open Antigravity or agy to read its limits",
   "{name} 的登入已失效，請重新登入": "{name} sign-in has expired; please sign in again",
   "暫時被限流，稍後自動重試": "Rate limited; retrying automatically",
   "暫時無法取得額度": "Limits are temporarily unavailable",
@@ -219,7 +220,8 @@ export const EN: Record<string, string> = {
   "以 GitHub 帳號登入，查詢 Copilot 的 Premium 與 Chat 額度": "Sign in with GitHub to look up Copilot's Premium and Chat limits",
   "登出": "Sign out",
   "登入": "Sign in",
-  "讀取這台電腦上 Claude Code、Codex、Cursor 與 GitHub Copilot 的登入，查詢用量上限；不會上傳任何 token": "Reads the Claude Code, Codex, Cursor and GitHub Copilot sign-ins on this PC to look up usage limits; no token is ever uploaded",
+  "讀取這台電腦上 Claude Code、Codex、Cursor 與 GitHub Copilot 的登入，以及執行中的 Antigravity，查詢用量上限；不會上傳任何 token":
+    "Reads the Claude Code, Codex, Cursor and GitHub Copilot sign-ins on this PC, plus a running Antigravity, to look up usage limits; no token is ever uploaded",
   "已儲存，正在重新查詢": "Saved; checking again",
   "Cursor 桌面版登入時會自動讀取；只用 Cursor CLI 的人，貼上 cursor.com 的 WorkosCursorSessionToken": "Read automatically when the Cursor desktop app is signed in; if you only use Cursor CLI, paste the WorkosCursorSessionToken from cursor.com",
   "讀取這台電腦上 Claude Code、Codex 與 Cursor 的登入，查詢用量上限；不會上傳任何 token": "Reads the Claude Code, Codex and Cursor sign-ins on this PC to look up usage limits; no token is ever uploaded",

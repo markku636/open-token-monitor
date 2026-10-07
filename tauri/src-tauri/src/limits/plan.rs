@@ -87,6 +87,16 @@ pub fn plan_label(text: &str) -> String {
         .unwrap_or_else(|| display_plan_text(&raw, Some(3)))
 }
 
+/// 上游 providers/antigravity/limits.js `antigravityPlanLabelFromParts`：先去掉開頭的 `Google` / `AI`
+/// （`Google AI Pro` → `Pro`），再走通用規則。
+pub fn antigravity_plan_label(text: &str) -> String {
+    let raw = clean_plan_text(text, &["google", "ai"]);
+    if raw.is_empty() {
+        return String::new();
+    }
+    plan_label(&raw)
+}
+
 fn claude_tier_label(tier: &str) -> String {
     let raw = clean_plan_text(tier, &[]);
     let words: Vec<&str> = raw
@@ -183,6 +193,27 @@ mod tests {
             ("max", "claude_max_20x", "Max 20x"),
         ] {
             assert_eq!(claude_plan_label(sub, tier), want, "{sub:?} {tier:?}");
+        }
+    }
+
+    #[test]
+    fn antigravity_table_matches_upstream() {
+        // node 以上游 `antigravityPlanLabelFromParts` 的原文跑出來的結果。
+        for (input, want) in [
+            ("Google AI Pro", "Pro"),
+            ("Google AI Ultra", "Ultra"),
+            ("google_ai_pro", "Pro"),
+            ("AI Premium", "Premium"),
+            ("Antigravity Starter Quota", "Antigravity Starter Quota"),
+            ("Free", "Free"),
+            ("g1-pro-tier", "G1 Pro Tier"),
+            ("Google", "Google"),
+            ("user@example.com", ""),
+            ("Google AI Pro (Trial)", "Pro (trial)"),
+            ("  ai-ultra  ", "Ultra"),
+            ("Google One AI Premium plan tier", "One AI Premium"),
+        ] {
+            assert_eq!(antigravity_plan_label(input), want, "{input:?}");
         }
     }
 

@@ -219,6 +219,8 @@ export interface LimitWindow {
   remainingPercent: number | null;
   resetsAt: string | null;
   windowMinutes: number | null;
+  /** 沒有重置時間時 provider 給的說明（Antigravity 的「Refreshes in four hours.」）。 */
+  resetDescription?: string;
   currency: string | null;
   showMeter: boolean;
 }
@@ -230,6 +232,8 @@ export interface LimitProvider {
   accountEmail: string;
   status: ProviderStatus;
   source: string;
+  /** 同一個 source 的細分（Antigravity RPC 的 app / cli / ide）。 */
+  sourceDetail?: string;
   updatedAt: string | null;
   windows: LimitWindow[];
 }
@@ -697,6 +701,22 @@ function mockLimits(now: string): LimitsView {
         ],
       },
       { provider: "codex", accountKey: "", accountLabel: "", accountEmail: "", status: "notConfigured", source: "", updatedAt: now, windows: [] },
+      {
+        provider: "antigravity",
+        accountKey: "sha256:preview-antigravity",
+        accountLabel: "Pro",
+        accountEmail: "preview@example.com",
+        status: "ok",
+        source: "rpc",
+        sourceDetail: "ide",
+        updatedAt: now,
+        windows: [
+          { ...win("session", "Gemini 5-hour", 100, 0), resetsAt: null, resetDescription: "Refreshes in four hours.", windowMinutes: 300 },
+          { ...win("weekly", "Gemini weekly", 18, 100), windowMinutes: 10_080 },
+          { ...win("session", "Claude/GPT 5-hour", 27, 2), windowMinutes: 300 },
+          { ...win("weekly", "Claude/GPT weekly", 36, 120), windowMinutes: 10_080 },
+        ],
+      },
     ],
   };
 }

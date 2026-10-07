@@ -35,7 +35,9 @@ pub const SUPPORTED_CLIENTS: &[&str] = &[
     "copilot",
 ];
 
-pub const SUPPORTED_LIMIT_PROVIDERS: &[&str] = &["claude", "codex", "cursor", "copilot"];
+/// 順序照上游 limitProviders.js 的 catalog（新安裝的預設順序，也是預設全開，與上游 `parseLimitProviders()` 相同）。
+pub const SUPPORTED_LIMIT_PROVIDERS: &[&str] =
+    &["claude", "codex", "cursor", "antigravity", "copilot"];
 
 /// hub 只接受這幾個上傳間隔（src/shared/syncUploadInterval.js）；其他值會被當成 0（即時）。
 pub const SYNC_UPLOAD_INTERVAL_OPTIONS: &[u64] = &[0, 600_000, 1_200_000, 1_800_000];

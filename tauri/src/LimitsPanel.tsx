@@ -1,23 +1,31 @@
-// 額度分頁：Claude Code 與 Codex 的用量上限（Rust 端 limits/ 探測，每 5 分鐘一次）。
+// 額度分頁：各工具的用量上限（Rust 端 limits/ 探測，每 5 分鐘一次）。
 
 import { RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type LimitProvider, type LimitWindow, type LimitsView } from "./api";
 import { fmtTime, fmtUntil } from "./format";
 import { t } from "./i18n";
-import { meterTone, moneyText, providerName, statusNote, windowTitle } from "./limits";
+import {
+  antigravityQuotaGroups,
+  meterTone,
+  moneyText,
+  providerName,
+  providerWindowTitle,
+  resetNote,
+  statusNote,
+} from "./limits";
 import { IconButton } from "./ui";
 
 const TONE_BAR = { danger: "bg-danger", warning: "bg-warning", accent: "bg-accent" } as const;
 
-function WindowRow({ w, now }: { w: LimitWindow; now: number }) {
+function WindowRow({ w, now, title }: { w: LimitWindow; now: number; title: string }) {
   const pct = w.usedPercent;
-  const until = fmtUntil(w.resetsAt, now);
+  const note = resetNote(w, fmtUntil(w.resetsAt, now));
   const money = w.metric === "spend" ? moneyText(w) : "";
   return (
     <li className="py-1">
       <div className="flex items-baseline justify-between gap-2 text-xs">
-        <span className="truncate">{windowTitle(w)}</span>
+        <span className="truncate">{title}</span>
         <span className="num shrink-0 text-fg/70">
           {money || (pct === null ? "—" : `${Math.round(pct)}%`)}
         </span>
@@ -27,8 +35,46 @@ function WindowRow({ w, now }: { w: LimitWindow; now: number }) {
           <div className={`h-1 rounded-full ${TONE_BAR[meterTone(pct)]}`} style={{ width: `${Math.max(2, pct)}%` }} />
         </div>
       )}
-      {until && <div className="mt-0.5 text-2xs text-fg/40">{t("{until}重置", { until })}</div>}
+      {note && <div className="mt-0.5 text-2xs text-fg/40">{note}</div>}
     </li>
+  );
+}
+
+function ProviderWindows({ p, now }: { p: LimitProvider; now: number }) {
+  // Antigravity 依模型群組分開，每組只標期間（上游 Limits 視圖的分組版面）。
+  const groups = p.provider === "antigravity" ? antigravityQuotaGroups(p) : [];
+  if (groups.length > 0) {
+    return (
+      <>
+        {groups.map((g) => (
+          <div key={g.label} role="group" aria-label={g.label} className="mt-1.5">
+            <div className="text-2xs font-medium text-fg/55">{g.label}</div>
+            <ul>
+              {g.windows.map((w, i) => (
+                <WindowRow
+                  key={`${w.kind}-${w.label}-${i}`}
+                  w={w}
+                  now={now}
+                  title={w.kind === "session" ? t("5 小時") : t("每週")}
+                />
+              ))}
+            </ul>
+          </div>
+        ))}
+      </>
+    );
+  }
+  return (
+    <ul className="mt-1">
+      {p.windows.map((w, i) => (
+        <WindowRow
+          key={`${w.kind}-${w.limitId ?? ""}-${w.label}-${i}`}
+          w={w}
+          now={now}
+          title={providerWindowTitle(p.provider, w)}
+        />
+      ))}
+    </ul>
   );
 }
 
@@ -43,13 +89,7 @@ function ProviderCard({ p, now }: { p: LimitProvider; now: number }) {
         </span>
       </div>
       {note && <p className={`mt-1 text-2xs ${p.status === "ok" ? "text-fg/45" : "text-warning"}`}>{note}</p>}
-      {p.windows.length > 0 && (
-        <ul className="mt-1">
-          {p.windows.map((w, i) => (
-            <WindowRow key={`${w.kind}-${w.limitId ?? ""}-${w.label}-${i}`} w={w} now={now} />
-          ))}
-        </ul>
-      )}
+      {p.windows.length > 0 && <ProviderWindows p={p} now={now} />}
     </section>
   );
 }

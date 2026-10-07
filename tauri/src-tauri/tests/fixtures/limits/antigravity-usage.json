@@ -1,0 +1,199 @@
+[
+  {
+    "name": "IDE language server with grouped quota and identity",
+    "processes": [
+      "4242 \"C:\\Users\\dev\\AppData\\Local\\Programs\\Antigravity\\resources\\app\\extensions\\antigravity\\bin\\language_server_windows_x64.exe\" --enable_lsp --csrf_token 0c5b8a4e-2f1d-4b7e-9a63-1d2e3f4a5b6c --extension_server_port 51001 --extension_server_csrf_token 7d8e9f00-aaaa-bbbb-cccc-111122223333 --app_data_dir antigravity",
+      "5151 C:\\Windows\\System32\\notepad.exe"
+    ],
+    "ports": [51234, 51235],
+    "rpc": {
+      "GetUnleashData": { "status": 200, "body": {} },
+      "RetrieveUserQuotaSummary": {
+        "status": 200,
+        "body": {
+          "response": {
+            "groups": [
+              {
+                "displayName": "Claude and GPT models",
+                "buckets": [
+                  { "bucketId": "3p-weekly", "displayName": "Weekly Limit", "remaining": { "remainingFraction": 0.6412 }, "resetTime": "2026-10-05T00:39:54.123456789Z" },
+                  { "bucketId": "3p-5h", "displayName": "Five Hour Limit", "remaining": { "remainingFraction": 0.73 }, "resetTime": "2026-09-30T12:52:10Z" }
+                ]
+              },
+              {
+                "displayName": "Gemini Models",
+                "buckets": [
+                  { "bucketId": "gemini-weekly", "displayName": "Weekly Limit", "remaining": { "case": "remainingFraction", "value": 0.8237 }, "resetTime": 1791160000 },
+                  { "bucketId": "gemini-5h", "displayName": "Five Hour Limit", "remainingFraction": 0.0, "description": "Refreshes in four hours." },
+                  { "bucketId": "gemini-session-history", "displayName": "Session History", "remainingFraction": 0.25 }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "GetUserStatus": {
+        "status": 200,
+        "body": {
+          "userStatus": {
+            "name": "Dev Example",
+            "email": "  Dev.Example@Example.COM ",
+            "userTier": { "id": "g1-pro-tier", "name": "Google AI Pro" },
+            "planStatus": { "planInfo": { "planName": "Pro", "planDisplayName": "Google AI Pro" } }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "desktop app with a disabled bucket and no identity",
+    "processes": [
+      "53602 /Applications/Antigravity.app/Contents/Resources/bin/language_server --standalone --override_ide_name antigravity --csrf_token ea1dbb2a-65a8-4766-a155-8e70f032f4ac --app_data_dir antigravity"
+    ],
+    "ports": [54733],
+    "rpc": {
+      "RetrieveUserQuotaSummary": {
+        "status": 200,
+        "body": {
+          "groups": [
+            {
+              "displayName": "Gemini Models",
+              "buckets": [
+                { "window": "5h", "displayName": "Five Hour Limit Remaining", "remaining": { "remainingFraction": 0.75 }, "resetTime": "2026-09-30T08:00:00+08:00" },
+                { "window": "weekly", "displayName": "Weekly Limit Remaining", "remainingFraction": 0.5, "disabled": true, "description": "Weekly limits are paused." }
+              ]
+            },
+            {
+              "displayName": "Partner models",
+              "buckets": [
+                { "bucketId": "partner-weekly", "remainingFraction": 1 }
+              ]
+            }
+          ]
+        }
+      },
+      "GetUserStatus": { "status": 500, "body": "internal error" }
+    }
+  },
+  {
+    "name": "legacy GetUserStatus model configs collapse into three pools",
+    "processes": [
+      "7777 \"C:\\Program Files\\Antigravity\\language_server.exe\" --app_data_dir antigravity --csrf_token win-token"
+    ],
+    "ports": [60001],
+    "rpc": {
+      "GetUserStatus": {
+        "status": 200,
+        "body": {
+          "userStatus": {
+            "email": "legacy@example.com",
+            "planStatus": { "planInfo": { "planDisplayName": "  ", "displayName": "Google AI Ultra" } },
+            "cascadeModelConfigData": {
+              "clientModelConfigs": [
+                { "label": "Gemini 3 Pro (High)", "modelOrAlias": { "model": "MODEL_GEMINI_3_PRO_HIGH" }, "quotaInfo": { "remainingFraction": 0.8, "resetTime": "2026-10-01T03:00:00Z" } },
+                { "label": "Gemini 3 Pro (Low)", "modelOrAlias": { "model": "MODEL_GEMINI_3_PRO_LOW" }, "quotaInfo": { "remainingFraction": 0.4, "resetTime": "2026-10-01T02:00:00Z" } },
+                { "label": "Gemini 3 Flash", "modelOrAlias": { "model": "MODEL_GEMINI_3_FLASH" }, "quotaInfo": { "remainingFraction": 0.9, "resetTime": "2026-10-01T01:00:00Z" } },
+                { "label": "Placeholder", "modelOrAlias": { "model": "MODEL_PLACEHOLDER_M9" }, "quotaInfo": { "remainingFraction": 0.01 } },
+                { "label": "Claude Sonnet 4.5", "modelOrAlias": { "model": "MODEL_CLAUDE_4_5_SONNET" }, "quotaInfo": { "remainingFraction": 0.6, "resetTime": "2026-10-01T05:00:00Z" } },
+                { "label": "  ", "modelOrAlias": { "model": "MODEL_OPENAI_GPT_OSS_120B_MEDIUM" }, "quotaInfo": { "remainingFraction": 0.6, "resetTime": "2026-10-01T04:00:00Z" } },
+                { "label": "No quota", "modelOrAlias": { "model": "MODEL_NO_QUOTA" } }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "agy CLI falls back to GetCommandModelConfigs",
+    "processes": [
+      "9001 \"C:\\Users\\j\\.antigravity\\agy.exe\" language-server"
+    ],
+    "ports": [61000],
+    "rpc": {
+      "GetUserStatus": { "status": 200, "body": {} },
+      "GetCommandModelConfigs": {
+        "status": 200,
+        "body": {
+          "clientModelConfigs": [
+            { "label": "Gemini 3 Flash", "modelOrAlias": { "model": "MODEL_GEMINI_3_FLASH" }, "quotaInfo": { "remainingFraction": 1, "resetTime": 1791000000000 } },
+            { "label": "Claude Opus 4.1", "modelOrAlias": { "model": "MODEL_CLAUDE_4_1_OPUS" }, "quotaInfo": { "remainingFraction": 0.3333333 } }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "hub-mode CLI reaches its explicit port although port discovery fails",
+    "processes": [
+      "9002 C:\\Users\\j\\.antigravity\\agy.exe --hub --hub-port=55555 --csrf_token=abc123 --app_data_dir=antigravity"
+    ],
+    "portsError": "Get-NetTCPConnection failed",
+    "rpc": {
+      "RetrieveUserQuotaSummary": {
+        "status": 200,
+        "body": {
+          "summary": {
+            "groups": [
+              {
+                "displayName": "Gemini",
+                "buckets": [
+                  { "window": "WEEKLY", "remainingFraction": 1 }
+                ]
+              },
+              {
+                "displayName": "Claude",
+                "buckets": [
+                  { "window": "weekly", "remainingFraction": 0.125, "resetTime": "2026-10-02T00:00:00Z" }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "GetUserStatus": { "status": 200, "body": { "userStatus": { "userTier": { "name": "Antigravity Starter Quota" } } } }
+    }
+  },
+  {
+    "name": "the language server rejects the CSRF token",
+    "processes": [
+      "53602 /Applications/Antigravity.app/Contents/Resources/bin/language_server --csrf_token stale --app_data_dir antigravity"
+    ],
+    "ports": [54733],
+    "rpc": {
+      "GetUnleashData": { "status": 400, "body": { "code": "invalid_argument", "message": "missing CSRF token" } },
+      "RetrieveUserQuotaSummary": { "status": 400, "body": { "code": "invalid_argument", "message": "missing CSRF token" } },
+      "GetUserStatus": { "status": 400, "body": { "code": "invalid_argument", "message": "missing CSRF token" } },
+      "GetCommandModelConfigs": { "status": 400, "body": { "code": "invalid_argument", "message": "missing CSRF token" } }
+    }
+  },
+  {
+    "name": "rate limited everywhere",
+    "processes": [
+      "53602 /Applications/Antigravity.app/Contents/Resources/bin/language_server --csrf_token t --app_data_dir antigravity"
+    ],
+    "ports": [54733],
+    "rpc": {
+      "RetrieveUserQuotaSummary": { "status": 429, "body": "slow down" },
+      "GetUserStatus": { "status": 429, "body": "slow down" },
+      "GetCommandModelConfigs": { "status": 429, "body": "slow down" }
+    }
+  },
+  {
+    "name": "desktop language server without a CSRF token",
+    "processes": [
+      "7777 \"C:\\Program Files\\Antigravity\\language_server.exe\" --app_data_dir antigravity"
+    ],
+    "ports": [60001],
+    "rpc": {}
+  },
+  {
+    "name": "not running",
+    "processes": [
+      "123 /bin/bash --login",
+      "28668 \"C:\\Users\\yuwell\\AppData\\Local\\agy\\bin\\agy.exe\" --mode=accept-edits --dangerously-skip-permissions"
+    ],
+    "ports": [1],
+    "rpc": {}
+  }
+]

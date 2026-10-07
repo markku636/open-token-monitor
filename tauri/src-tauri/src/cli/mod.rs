@@ -156,12 +156,12 @@ enum Command {
     },
     /// 檢查 hub 的 /api/health
     Health,
-    /// 探測一次 Claude Code / Codex 的額度並印出（上傳內容裡的 limits；不含任何 token）
+    /// 探測一次額度並印出（上傳內容裡的 limits；不含任何 token）
     Limits {
         /// 印 JSON（LimitsSummary）
         #[arg(long)]
         json: bool,
-        /// 相容測試用：不連網，以目錄裡的 claude-usage.json / codex-usage.json 跑對應，印 JSON
+        /// 相容測試用：不連網，以目錄裡的 <provider>-usage.json 跑對應，印 JSON
         #[arg(long, hide = true)]
         replay: Option<PathBuf>,
     },
@@ -758,7 +758,7 @@ async fn cmd_once(
 }
 
 /// 相容測試：把固定的 API 回應交給與正式探測相同的對應函式，身分欄位留空、時間固定。
-fn cmd_limits_replay(dir: &std::path::Path) -> AppResult<()> {
+async fn cmd_limits_replay(dir: &std::path::Path) -> AppResult<()> {
     use crate::limits::normalize::finish_provider;
     use crate::wire::{LimitProvider, LimitsSummary, ProviderStatus};
     const AT: &str = "2026-01-01T00:00:00.000Z";
@@ -798,6 +798,12 @@ fn cmd_limits_replay(dir: &std::path::Path) -> AppResult<()> {
     }
     if let Some(u) = read("cursor-usage.json")? {
         providers.push(crate::limits::cursor::replay(&u, AT.into()));
+    }
+    // 多個情境（程序、port、各 RPC 的回應），每個情境一列，依序輸出。
+    if let Some(scenarios) = read("antigravity-usage.json")? {
+        for scenario in scenarios.as_array().into_iter().flatten() {
+            providers.push(crate::limits::antigravity::replay(scenario, AT.into()).await);
+        }
     }
     print_json(
         &LimitsSummary {
@@ -1168,7 +1174,7 @@ pub async fn run(cli: Cli) -> ExitCode {
             Command::Scan { ref period, raw } => cmd_scan(&cli, ctx, period.clone(), raw).await,
             Command::Health => cmd_health(ctx).await,
             Command::Limits { json, ref replay } => match replay {
-                Some(dir) => cmd_limits_replay(dir),
+                Some(dir) => cmd_limits_replay(dir).await,
                 None => cmd_limits(ctx, json).await,
             },
             Command::Company {
