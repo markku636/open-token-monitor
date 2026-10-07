@@ -129,10 +129,14 @@ export const EN: Record<string, string> = {
   "2 分鐘": "2 min",
   "5 分鐘": "5 min",
   "15 分鐘": "15 min",
-  "定時掃描間隔": "Scheduled scan interval",
-  "同時同步 Cursor 與 Antigravity；每小時另外完整重掃一次": "Also syncs Cursor and Antigravity; a full rescan still runs hourly",
-  "即時更新": "Live updates",
-  "關閉時只依「定時掃描間隔」更新": "When off, numbers update only on the scheduled scan",
+  "採集頻率": "Collection frequency",
+  "即時追蹤": "Live watch",
+  "智慧採集（10 分鐘）": "Smart (10 minutes)",
+  "不監看檔案，定時掃描並同步 Cursor 與 Antigravity；每小時另外完整重掃一次":
+    "File watching is off; scans run on the schedule and also sync Cursor and Antigravity, with a full rescan hourly",
+  "工具有新紀錄時才在每 10 分鐘的檢查更新；每小時另外完整校準一次":
+    "Updates at the 10-minute check only when a tool wrote new usage; a full reconciliation still runs hourly",
+  "無法監看：{e}（改為每 10 分鐘掃描）": "Cannot watch: {e} (scanning every 10 minutes instead)",
   "無法監看：{e}（改為定時掃描）": "Cannot watch: {e} (falling back to scheduled scans)",
   "監看 {n} 個資料夾，有變動時幾秒內更新": "Watching {n} folders; updates within seconds of a change",
   "工具的紀錄有變動時幾秒內更新": "Updates within seconds when a tool writes new usage",

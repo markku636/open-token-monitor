@@ -13,6 +13,14 @@
 //! 它後面接著跑（上游 `scheduleTick`）。**沒有冷卻時間**：產品承諾 3–5 秒內更新。
 //! 定時 tick 的時間表不受 watch tick 影響，否則一直有事件時 Cursor 永遠等不到同步。
 //!
+//! 收集節奏（設定 `collectionMode`，上游 main.js 的三種模式）：
+//! - `live`：上面的 watch tick，加上 `collectionIntervalMs` 的定時 tick。
+//! - `smart`（`interval_requires_activity`，上游 `intervalRequiresActivity`）：檔案事件只把活動計數
+//!   加一，不觸發 tick；固定 10 分鐘的定時 tick 在第一次收集成功之後，只有「上次成功的 tick 開始後
+//!   有活動」或「錨點滿一小時」（每小時的完整掃描）時才跑，否則這一輪什麼都不做（history 也跟著
+//!   等）。監看沒在跑時看不到活動，定時 tick 就不跳過（上游在這種情況只剩每小時的完整掃描）。
+//! - `interval`：不監看（`watch: None`），只有定時 tick。
+//!
 //! history（`tokscale graph`，上游 collector.js `collectHistoryOnce`）在用量發佈**之後**、同一個
 //! tick 裡序列地跑，不拖慢 3–5 秒的即時更新，也不與用量掃描並行。第一個 tick、手動重掃、換日時一定跑，
 //! 其他 tick 每 `historyIntervalMs` 跑一次；換日那次失敗就在 60 秒後補跑一次（上游
@@ -93,6 +101,9 @@ pub struct RuntimeConfig {
     pub sender: Option<SendFn>,
     pub events: EventSink,
     pub watch: Option<WatchConfig>,
+    /// 智慧採集（見檔頭）：檔案事件只記下有活動，定時 tick 沒有活動就跳過。tm-agent 永遠是 false
+    ///（上游 agent 只有 `TOKEN_MONITOR_WATCH` 開關）。
+    pub interval_requires_activity: bool,
     /// history 的 graph 掃描間隔（`collector.history_enabled` 關閉時不用）。
     pub history_interval: Duration,
     /// session usage archive 的 SQLite 檔；`None` = 關閉。
@@ -195,6 +206,30 @@ pub fn should_include_history(
     forced || since_last.is_none_or(|elapsed| elapsed >= interval)
 }
 
+/// 智慧採集的活動計數（上游 collector.js 的 `activityRevision` / `collectedActivityRevision` /
+/// `initialCollectionComplete`）。
+#[derive(Debug, Default)]
+struct Activity {
+    /// 每個相關的檔案事件加一。
+    revision: AtomicU64,
+    /// 最近一次成功的 tick **開始時**的計數：tick 進行中的事件留給下一輪。
+    collected: AtomicU64,
+    /// 第一次成功收集之前不跳過任何定時 tick。
+    initial_complete: AtomicBool,
+}
+
+/// 智慧採集的定時 tick 要不要跳過（上游 collector.js `loop` 開頭的判斷）：第一次收集成功之後，
+/// 上次成功的 tick 以來沒有活動、也還不到每小時的完整掃描，這一輪就不掃。
+pub fn skip_idle_interval(
+    requires_activity: bool,
+    initial_complete: bool,
+    full_scan_due: bool,
+    revision: u64,
+    collected: u64,
+) -> bool {
+    requires_activity && initial_complete && !full_scan_due && revision <= collected
+}
+
 pub struct DeviceRuntime {
     state: Mutex<DeviceState>,
     collector: CollectorConfig,
@@ -214,6 +249,8 @@ pub struct DeviceRuntime {
     watcher: Mutex<Option<watch::Watcher>>,
     /// 監看的候選根目錄與事件通道；完整掃描後據此重新監看新出現的目錄。
     watch_roots: Mutex<Option<(Vec<WatchRoot>, mpsc::UnboundedSender<()>)>>,
+    interval_requires_activity: bool,
+    activity: Activity,
     limits: Option<LimitsConfig>,
     limits_refresh: Notify,
     history_interval: Duration,
@@ -264,6 +301,8 @@ impl DeviceRuntime {
             tasks: Mutex::new(Vec::new()),
             watcher: Mutex::new(None),
             watch_roots: Mutex::new(None),
+            interval_requires_activity: cfg.interval_requires_activity,
+            activity: Activity::default(),
             limits: cfg.limits,
             limits_refresh: Notify::new(),
             history_interval: cfg.history_interval,
@@ -343,7 +382,14 @@ impl DeviceRuntime {
                 let mut reason = TickReason::Startup;
                 let mut next_interval = tokio::time::Instant::now() + rt.collection_interval;
                 loop {
-                    let _ = rt.do_tick(reason).await;
+                    if reason == TickReason::Interval && rt.interval_is_idle() {
+                        // 智慧採集：上次之後沒有活動，這一輪不掃，只重新計時（上游 `loop` 的提早 return）。
+                        tracing::debug!(
+                            "no activity since the last collection; skipping this interval"
+                        );
+                    } else {
+                        let _ = rt.do_tick(reason).await;
+                    }
                     // watch tick 不重設定時表（見檔頭）；其他 tick 都掃過全部 client，從現在重新計時。
                     if !matches!(reason, TickReason::Watch | TickReason::HistoryRetry) {
                         next_interval = tokio::time::Instant::now() + rt.collection_interval;
@@ -463,16 +509,23 @@ impl DeviceRuntime {
         self.arm_watcher(&wc.roots, tx.clone());
         *self.watch_roots.lock().unwrap() = Some((wc.roots.clone(), tx));
         let debounce = wc.debounce;
+        // 上游 `watchTriggersCollection`：只有 live 由檔案事件觸發 tick。
+        let triggers_collection = !self.interval_requires_activity;
         Some(tokio::spawn(async move {
             loop {
                 tokio::select! {
                     got = rx.recv() => if got.is_none() { break },
                     _ = self.cancel.cancelled() => break,
                 }
+                self.note_activity();
+                if !triggers_collection {
+                    // 智慧採集：只記下有活動，由下一個定時 tick 決定要不要掃。
+                    continue;
+                }
                 // 尾端防抖：安靜滿 `debounce` 才觸發；到點時有 tick 在跑就重新計時。
                 loop {
                     tokio::select! {
-                        got = rx.recv() => if got.is_none() { return },
+                        got = rx.recv() => if got.is_none() { return } else { self.note_activity() },
                         _ = tokio::time::sleep(debounce) => {
                             if !self.tick_in_flight.load(Ordering::SeqCst) {
                                 break;
@@ -484,6 +537,31 @@ impl DeviceRuntime {
                 self.watch_fire.notify_one();
             }
         }))
+    }
+
+    /// 一個相關的檔案事件（上游 `handleWatchEvent` 的 `activityRevision += 1`）。
+    fn note_activity(&self) {
+        self.activity.revision.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// 這個定時 tick 在智慧採集下可以跳過嗎（見 `skip_idle_interval`）。
+    fn interval_is_idle(&self) -> bool {
+        if !self.interval_requires_activity || !self.is_watching() {
+            return false;
+        }
+        let full_scan_due = self
+            .anchor
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_none_or(|a| a.full_scan_at.elapsed() >= FULL_SCAN_INTERVAL);
+        skip_idle_interval(
+            true,
+            self.activity.initial_complete.load(Ordering::SeqCst),
+            full_scan_due,
+            self.activity.revision.load(Ordering::SeqCst),
+            self.activity.collected.load(Ordering::SeqCst),
+        )
     }
 
     fn enqueue_latest_if_new(&self) {
@@ -723,11 +801,16 @@ impl DeviceRuntime {
         });
         self.status.lock().unwrap().collecting = true;
         let started = Instant::now();
+        let activity_at_start = self.activity.revision.load(Ordering::SeqCst);
         let result = self.collect(reason).await;
         let mut status = self.status.lock().unwrap();
         status.collecting = false;
         match result {
             Ok(collected) => {
+                self.activity
+                    .collected
+                    .fetch_max(activity_at_start, Ordering::SeqCst);
+                self.activity.initial_complete.store(true, Ordering::SeqCst);
                 let summary = self.with_archive(collected.summary);
                 status.last_collect_at = Some(summary.updated_at.clone());
                 status.last_error = None;
@@ -993,6 +1076,37 @@ mod tests {
         std::fs::write(dir.join("alltime.json"), row(all_time)).unwrap();
     }
 
+    fn fixture_config(
+        dir: &std::path::Path,
+        events: EventSink,
+        anchor_file: Option<std::path::PathBuf>,
+        seed_from_anchor: bool,
+    ) -> RuntimeConfig {
+        RuntimeConfig {
+            envelope: crate::identity::envelope("preview-test", "test"),
+            collector: CollectorConfig {
+                tracked_clients: vec!["claude".into()],
+                all_time_since: "2024-01-01".into(),
+                projects_enabled: false,
+                history_enabled: false,
+            },
+            source: ScanSource::Fixtures(dir.into()),
+            collection_interval: Duration::from_secs(300),
+            upload_interval_ms: 0,
+            sender: None,
+            events,
+            watch: None,
+            interval_requires_activity: false,
+            history_interval: Duration::from_secs(900),
+            session_archive: None,
+            archive_writes: false,
+            anchor_file,
+            limits: None,
+            progressive: true,
+            seed_from_anchor,
+        }
+    }
+
     fn fixture_runtime(
         dir: &std::path::Path,
         events: EventSink,
@@ -1000,30 +1114,149 @@ mod tests {
         seed_from_anchor: bool,
     ) -> DeviceRuntime {
         DeviceRuntime::build(
-            RuntimeConfig {
-                envelope: crate::identity::envelope("preview-test", "test"),
-                collector: CollectorConfig {
-                    tracked_clients: vec!["claude".into()],
-                    all_time_since: "2024-01-01".into(),
-                    projects_enabled: false,
-                    history_enabled: false,
-                },
-                source: ScanSource::Fixtures(dir.into()),
-                collection_interval: Duration::from_secs(300),
-                upload_interval_ms: 0,
-                sender: None,
-                events,
-                watch: None,
-                history_interval: Duration::from_secs(900),
-                session_archive: None,
-                archive_writes: false,
-                anchor_file,
-                limits: None,
-                progressive: true,
-                seed_from_anchor,
-            },
+            fixture_config(dir, events, anchor_file, seed_from_anchor),
             None,
         )
+    }
+
+    /// `smart` = 智慧採集；live 與 interval 在 runtime 裡的差別只有有沒有 `watch`。
+    fn cadence_runtime(dir: &std::path::Path, smart: bool) -> (Arc<DeviceRuntime>, Seen) {
+        let (seen, events) = recorder();
+        let mut cfg = fixture_config(dir, events, None, false);
+        cfg.interval_requires_activity = smart;
+        (Arc::new(DeviceRuntime::build(cfg, None)), seen)
+    }
+
+    /// 在 `dir/watched` 開一個真的 watcher（runtime 才算在監看），回傳事件通道讓測試直接送事件。
+    fn watch_fixture(
+        rt: &Arc<DeviceRuntime>,
+        dir: &std::path::Path,
+        debounce: Duration,
+    ) -> mpsc::UnboundedSender<()> {
+        let watched = dir.join("watched");
+        std::fs::create_dir_all(&watched).unwrap();
+        rt.clone()
+            .start_watching(WatchConfig {
+                roots: vec![WatchRoot {
+                    client: "claude".into(),
+                    dir: watched,
+                    recursive: true,
+                    filter: watch::Filter::All,
+                }],
+                debounce,
+            })
+            .unwrap();
+        assert!(rt.is_watching());
+        rt.watch_roots.lock().unwrap().as_ref().unwrap().1.clone()
+    }
+
+    async fn wait_for_activity(rt: &DeviceRuntime, revision: u64) {
+        for _ in 0..400 {
+            if rt.activity.revision.load(Ordering::SeqCst) >= revision {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("the watch task never counted activity {revision}");
+    }
+
+    #[test]
+    fn smart_intervals_skip_only_when_nothing_happened() {
+        assert!(skip_idle_interval(true, true, false, 3, 3));
+        assert!(
+            !skip_idle_interval(false, true, false, 3, 3),
+            "live and interval never skip"
+        );
+        assert!(
+            !skip_idle_interval(true, false, false, 0, 0),
+            "not before the first successful collection"
+        );
+        assert!(
+            !skip_idle_interval(true, true, true, 3, 3),
+            "the hourly full scan runs regardless of activity"
+        );
+        assert!(
+            !skip_idle_interval(true, true, false, 4, 3),
+            "a file event since the last tick started"
+        );
+    }
+
+    #[tokio::test]
+    async fn smart_mode_collects_after_activity_and_on_the_hourly_full_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        write_periods(dir.path(), 1, 10, 100);
+        let (rt, seen) = cadence_runtime(dir.path(), true);
+        let tx = watch_fixture(&rt, dir.path(), Duration::from_millis(20));
+        assert!(!rt.interval_is_idle(), "nothing collected yet");
+        rt.do_tick_inner(TickReason::Startup).await.unwrap();
+        assert!(rt.interval_is_idle(), "no activity since the startup scan");
+
+        // 檔案事件只記下活動：沒有 watch tick，下一個定時 tick 才掃（只掃 today、精確 delta）。
+        tx.send(()).unwrap();
+        wait_for_activity(&rt, 1).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), rt.watch_fire.notified())
+                .await
+                .is_err(),
+            "smart mode never fires a watch tick"
+        );
+        assert!(!rt.interval_is_idle());
+        write_periods(dir.path(), 3, 12, 102);
+        rt.do_tick_inner(TickReason::Interval).await.unwrap();
+        let last_totals = || seen.lock().unwrap().last().map(|&(_, t, m, a)| (t, m, a));
+        assert_eq!(last_totals(), Some((3, 12, 102)));
+        assert!(rt.interval_is_idle(), "that tick consumed the activity");
+
+        // 沒有錨點（或錨點滿一小時）時不看活動，完整掃描。
+        write_periods(dir.path(), 3, 20, 200);
+        let anchor = rt.anchor.lock().unwrap().take();
+        assert!(!rt.interval_is_idle());
+        rt.do_tick_inner(TickReason::Interval).await.unwrap();
+        assert_eq!(
+            last_totals(),
+            Some((3, 20, 200)),
+            "month and allTime rescanned"
+        );
+        assert!(rt.interval_is_idle());
+        // Windows 的 Instant 從開機起算：開機不到一小時的機器做不出「一小時前」。
+        if let Some(hour_ago) = Instant::now().checked_sub(FULL_SCAN_INTERVAL) {
+            let mut anchor = anchor.unwrap();
+            anchor.full_scan_at = hour_ago;
+            *rt.anchor.lock().unwrap() = Some(anchor);
+            assert!(!rt.interval_is_idle(), "the hourly full scan is due");
+        }
+        rt.stop().await;
+    }
+
+    #[tokio::test]
+    async fn live_mode_turns_file_events_into_watch_ticks_and_never_skips() {
+        let dir = tempfile::tempdir().unwrap();
+        write_periods(dir.path(), 1, 10, 100);
+        let (rt, _) = cadence_runtime(dir.path(), false);
+        let tx = watch_fixture(&rt, dir.path(), Duration::from_millis(20));
+        rt.do_tick_inner(TickReason::Startup).await.unwrap();
+        assert!(!rt.interval_is_idle());
+        tx.send(()).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), rt.watch_fire.notified())
+                .await
+                .is_ok(),
+            "a debounced watch tick"
+        );
+        assert!(!rt.interval_is_idle());
+        rt.stop().await;
+    }
+
+    #[tokio::test]
+    async fn smart_mode_without_a_watcher_does_not_skip() {
+        let dir = tempfile::tempdir().unwrap();
+        write_periods(dir.path(), 1, 10, 100);
+        let (rt, _) = cadence_runtime(dir.path(), true);
+        rt.do_tick_inner(TickReason::Startup).await.unwrap();
+        assert!(
+            !rt.interval_is_idle(),
+            "activity is invisible, so every interval collects"
+        );
     }
 
     #[tokio::test]

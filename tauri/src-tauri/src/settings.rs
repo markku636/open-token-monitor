@@ -56,6 +56,16 @@ pub const EXPORT_INTERVAL_OPTIONS: &[u64] =
     &[30_000, 60_000, 300_000, 900_000, 1_800_000, 3_600_000];
 /// 上游 collector.js 的 watchDebounceMs 預設值。
 pub const DEFAULT_WATCH_DEBOUNCE_MS: u64 = 1_500;
+/// 上游 main.js `COLLECTION_MODE_VALUES`：`live`（檔案一變就掃）、`smart`（檔案事件只記下有活動，
+/// 定時 tick 有活動才掃）、`interval`（不監看，只定時掃）。
+pub const COLLECTION_MODE_VALUES: &[&str] = &["live", "smart", "interval"];
+/// 上游 `COLLECTION_INTERVAL_OPTIONS` / `DEFAULT_COLLECTION_INTERVAL_MS`。
+pub const COLLECTION_INTERVAL_OPTIONS: &[u64] = &[300_000, 900_000, 1_800_000];
+pub const DEFAULT_COLLECTION_INTERVAL_MS: u64 = 300_000;
+/// 上游 `SMART_COLLECTION_INTERVAL_MS`：智慧採集固定每 10 分鐘看一次有沒有活動。刻意不放進
+/// `COLLECTION_INTERVAL_OPTIONS`：那份清單驗證存下來的 `collectionIntervalMs`，收了 10 分鐘，
+/// 智慧採集的值就會在切回 live / interval 後悄悄改掉那邊的間隔。
+pub const SMART_COLLECTION_INTERVAL_MS: u64 = 600_000;
 
 const MAX_CUSTOM_SCAN_PATHS_PER_CLIENT: usize = 16;
 const MAX_CUSTOM_SCAN_PATH_LENGTH: usize = 4096;
@@ -88,10 +98,16 @@ pub struct Settings {
     pub custom_scan_paths: IndexMap<String, Vec<String>>,
     pub all_time_since: String,
     pub projects_enabled: bool,
-    /// 定時 tick 的間隔（錨點有效時只掃 today，否則 today → month → allTime）。
+    /// 收集節奏（上游 `collectionMode`）：`live` | `smart` | `interval`，見 `COLLECTION_MODE_VALUES`。
+    /// 舊版設定檔沒有這個鍵時反序列化成空字串，由 `validate()` 依 `watchEnabled` 推出。
+    #[serde(default)]
+    pub collection_mode: String,
+    /// `interval` 的定時間隔，也是 `live` 的備援與 Cursor / Antigravity 同步間隔（錨點有效時只掃
+    /// today，否則 today → month → allTime）；`smart` 固定 10 分鐘，不用這個值。
     pub collection_interval_ms: u64,
     pub tokscale_timeout_ms: u64,
-    /// 監看來源目錄，有變動就在 3–5 秒內更新（上游 `TOKEN_MONITOR_WATCH`）。
+    /// 監看來源目錄（`collectionMode` 不是 `interval` 就是 true，由 `validate()` 推出）。留著給降版與
+    /// tm-agent 讀：`TOKEN_MONITOR_WATCH` 覆寫的就是它。
     pub watch_enabled: bool,
     /// 檔案事件的尾端防抖（毫秒）。
     pub watch_debounce_ms: u64,
@@ -169,7 +185,8 @@ impl Default for Settings {
             custom_scan_paths: IndexMap::new(),
             all_time_since: "2024-01-01".into(),
             projects_enabled: true,
-            collection_interval_ms: 300_000,
+            collection_mode: "live".into(),
+            collection_interval_ms: DEFAULT_COLLECTION_INTERVAL_MS,
             tokscale_timeout_ms: 120_000,
             watch_enabled: true,
             watch_debounce_ms: DEFAULT_WATCH_DEBOUNCE_MS,
@@ -278,7 +295,26 @@ impl Settings {
             self.limits_refresh_ms = 300_000;
             changed.push("limitsRefreshMs");
         }
-        let interval = self.collection_interval_ms.clamp(60_000, 3_600_000);
+        // 上游載入時的 normalizeCollectionMode（fallback live）。舊版 Tauri 的設定檔沒有 collectionMode：
+        // 關掉「即時更新」（watchEnabled: false）的人改成 interval，其他人 live。
+        let mode = if self.collection_mode.is_empty() && !self.watch_enabled {
+            "interval".to_string()
+        } else {
+            normalize_collection_mode(&self.collection_mode, "live")
+        };
+        if mode != self.collection_mode {
+            self.collection_mode = mode;
+            changed.push("collectionMode");
+        }
+        let watch = self.collection_mode != "interval";
+        if watch != self.watch_enabled {
+            self.watch_enabled = watch;
+            changed.push("watchEnabled");
+        }
+        let interval = normalize_collection_interval_ms(
+            Some(self.collection_interval_ms as f64),
+            DEFAULT_COLLECTION_INTERVAL_MS,
+        );
         if interval != self.collection_interval_ms {
             self.collection_interval_ms = interval;
             changed.push("collectionIntervalMs");
@@ -450,11 +486,83 @@ impl Settings {
             }
             obj.insert(key.clone(), value.clone());
         }
+        // 上游 patch 的正規化：不合法的值保留原本的設定，而不是回到預設值。上游的設定頁選「智慧採集」時
+        // 一起送 collectionIntervalMs: 600000，就是靠這條被擋下、保留 interval 模式原本的間隔。
+        if let Some(value) = patch.get("collectionMode") {
+            let mode =
+                normalize_collection_mode(value.as_str().unwrap_or(""), &self.collection_mode);
+            obj.insert("collectionMode".into(), Value::String(mode));
+        }
+        if let Some(value) = patch.get("collectionIntervalMs") {
+            let ms = value
+                .as_f64()
+                .or_else(|| value.as_str().and_then(|s| s.trim().parse().ok()));
+            let ms = normalize_collection_interval_ms(ms, self.collection_interval_ms);
+            obj.insert("collectionIntervalMs".into(), Value::from(ms));
+        }
         let mut next: Settings =
             serde_json::from_value(merged).map_err(|e| AppError::Settings(e.to_string()))?;
+        if !patch.contains_key("collectionMode") {
+            if let Some(on) = patch.get("watchEnabled").and_then(Value::as_bool) {
+                next.set_watch_enabled(on);
+            }
+        }
         next.validate();
         Ok(next)
     }
+
+    /// 舊的「即時更新」開關（Tauri M2 的 `watchEnabled`、tm-agent 的 `TOKEN_MONITOR_WATCH`）換成收集節奏：
+    /// 關 = `interval`；開 = 原本 `interval` 的改回 `live`，`smart` 本來就有監看，保持不變。
+    pub fn set_watch_enabled(&mut self, on: bool) {
+        if !on {
+            self.collection_mode = "interval".into();
+        } else if self.collection_mode == "interval" {
+            self.collection_mode = "live".into();
+        }
+        self.watch_enabled = on;
+    }
+
+    /// 定時 tick 的間隔（上游 `collectorIntervalMs`）：智慧採集固定 10 分鐘，其他用 `collectionIntervalMs`。
+    pub fn collector_interval_ms(&self) -> u64 {
+        if self.collection_mode == "smart" {
+            SMART_COLLECTION_INTERVAL_MS
+        } else {
+            self.collection_interval_ms
+        }
+    }
+
+    /// 定時 tick 只在有活動時才掃（上游 `collectorIntervalRequiresActivity`）；同時代表檔案事件不直接
+    /// 觸發 tick（上游 `collectorWatchTriggersCollection` 只在 live 為 true）。
+    pub fn interval_requires_activity(&self) -> bool {
+        self.collection_mode == "smart"
+    }
+}
+
+/// 上游 main.js `normalizeCollectionMode`：去空白後必須是三個值之一，否則用 fallback（再不合法就是 live）。
+pub fn normalize_collection_mode(value: &str, fallback: &str) -> String {
+    let next = value.trim();
+    if COLLECTION_MODE_VALUES.contains(&next) {
+        next.to_string()
+    } else if COLLECTION_MODE_VALUES.contains(&fallback) {
+        fallback.to_string()
+    } else {
+        "live".to_string()
+    }
+}
+
+/// 上游 main.js `normalizeCollectionIntervalMs`：只接受 5 / 15 / 30 分鐘，否則用 fallback（再不合法就是
+/// 5 分鐘）。`None` 是上游 `Number()` 得到 NaN 的情況。
+pub fn normalize_collection_interval_ms(value: Option<f64>, fallback: u64) -> u64 {
+    let allowed = |ms: f64| {
+        COLLECTION_INTERVAL_OPTIONS
+            .iter()
+            .copied()
+            .find(|o| *o as f64 == ms)
+    };
+    value
+        .and_then(allowed)
+        .or_else(|| allowed(fallback as f64))
+        .unwrap_or(DEFAULT_COLLECTION_INTERVAL_MS)
 }
 
 /// 上游 `clampZoom`：兩位小數、夾在 0.7–1.6，無效值回到 1。
@@ -883,6 +991,120 @@ mod tests {
         assert_eq!(
             s.patched(&patch).unwrap().sync_upload_interval_ms,
             1_200_000
+        );
+    }
+
+    #[test]
+    fn collection_mode_is_normalized_like_upstream() {
+        assert_eq!(normalize_collection_mode(" smart ", "live"), "smart");
+        assert_eq!(normalize_collection_mode("Smart", "interval"), "interval");
+        assert_eq!(normalize_collection_mode("", "bogus"), "live");
+        assert_eq!(
+            normalize_collection_interval_ms(Some(900_000.0), 0),
+            900_000
+        );
+        assert_eq!(
+            normalize_collection_interval_ms(Some(600_000.0), 1_800_000),
+            1_800_000,
+            "smart's 10 minutes is not a valid interval"
+        );
+        assert_eq!(normalize_collection_interval_ms(None, 60_000), 300_000);
+
+        let mut s = Settings {
+            collection_mode: "weird".into(),
+            collection_interval_ms: 60_000,
+            ..Settings::default()
+        };
+        s.validate();
+        assert_eq!(s.collection_mode, "live");
+        assert_eq!(s.collection_interval_ms, 300_000);
+        assert!(s.watch_enabled);
+        assert_eq!(s.collector_interval_ms(), 300_000);
+        assert!(!s.interval_requires_activity());
+    }
+
+    #[test]
+    fn older_settings_files_map_watch_enabled_to_a_collection_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let load = |raw: &str| {
+            std::fs::write(dir.path().join(SETTINGS_FILE), raw).unwrap();
+            Settings::load_in(dir.path()).unwrap().0
+        };
+        let s = load(r#"{"deviceId":"a","watchEnabled":false,"collectionIntervalMs":900000}"#);
+        assert_eq!(s.collection_mode, "interval");
+        assert!(!s.watch_enabled);
+        assert_eq!(s.collector_interval_ms(), 900_000);
+        let s = load(r#"{"deviceId":"a","watchEnabled":true}"#);
+        assert_eq!(s.collection_mode, "live");
+        assert!(s.watch_enabled);
+        assert_eq!(load(r#"{"deviceId":"a"}"#).collection_mode, "live");
+        // 有 collectionMode 的檔案以它為準；watchEnabled 跟著推出（降版的 Tauri 讀得到）。
+        let s = load(r#"{"deviceId":"a","collectionMode":"smart","watchEnabled":false}"#);
+        assert_eq!(s.collection_mode, "smart");
+        assert!(s.watch_enabled);
+        assert_eq!(s.collector_interval_ms(), SMART_COLLECTION_INTERVAL_MS);
+        assert!(s.interval_requires_activity());
+        let s = load(r#"{"deviceId":"a","collectionMode":"interval"}"#);
+        assert!(!s.watch_enabled);
+    }
+
+    #[test]
+    fn collection_patches_keep_the_current_value_when_invalid() {
+        let patch = |s: &Settings, v: Value| s.patched(v.as_object().unwrap()).unwrap();
+        let interval = patch(
+            &Settings::default(),
+            json!({ "collectionMode": "interval", "collectionIntervalMs": 1_800_000 }),
+        );
+        assert_eq!(interval.collection_mode, "interval");
+        assert!(!interval.watch_enabled);
+        assert_eq!(interval.collector_interval_ms(), 1_800_000);
+        // 上游設定頁選智慧採集時一起送 600000：被擋下，interval 的 30 分鐘保留給之後切回來。
+        let smart = patch(
+            &interval,
+            json!({ "collectionMode": "smart", "collectionIntervalMs": 600_000 }),
+        );
+        assert_eq!(smart.collection_mode, "smart");
+        assert_eq!(smart.collection_interval_ms, 1_800_000);
+        assert_eq!(smart.collector_interval_ms(), 600_000);
+        assert!(smart.watch_enabled);
+        let same = patch(
+            &smart,
+            json!({ "collectionMode": "turbo", "collectionIntervalMs": "abc" }),
+        );
+        assert_eq!(same.collection_mode, "smart");
+        assert_eq!(same.collection_interval_ms, 1_800_000);
+        assert_eq!(
+            patch(&smart, json!({ "collectionMode": 3 })).collection_mode,
+            "smart"
+        );
+        assert_eq!(
+            patch(&smart, json!({ "collectionIntervalMs": "900000" })).collection_interval_ms,
+            900_000
+        );
+    }
+
+    #[test]
+    fn a_legacy_watch_enabled_patch_still_switches_watching() {
+        let patch = |s: &Settings, v: Value| s.patched(v.as_object().unwrap()).unwrap();
+        let off = patch(&Settings::default(), json!({ "watchEnabled": false }));
+        assert_eq!(off.collection_mode, "interval");
+        assert!(!off.watch_enabled);
+        let on = patch(&off, json!({ "watchEnabled": true }));
+        assert_eq!(on.collection_mode, "live");
+        let smart = patch(&on, json!({ "collectionMode": "smart" }));
+        assert_eq!(
+            patch(&smart, json!({ "watchEnabled": true })).collection_mode,
+            "smart",
+            "smart already watches"
+        );
+        assert_eq!(
+            patch(
+                &smart,
+                json!({ "watchEnabled": false, "collectionMode": "live" })
+            )
+            .collection_mode,
+            "live",
+            "collectionMode wins over the legacy key"
         );
     }
 

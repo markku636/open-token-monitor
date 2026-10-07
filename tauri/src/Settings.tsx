@@ -15,6 +15,7 @@ import {
 } from "./api";
 import type { LangSetting } from "./i18n";
 import { clientLabel } from "./clients";
+import { cadenceOf, cadencePatch, type CollectionCadence } from "./collectionCadence";
 import { fmtTime } from "./format";
 import { useApp } from "./store";
 import { t } from "./i18n";
@@ -265,10 +266,19 @@ function syncNote(sync: SyncReport, base: string): string {
   }
 }
 
-// 即時更新的說明：監看中的目錄數，或為什麼只能靠定時掃描。
-function watchNote(s: SettingsView, appStatus: AppStatus | null): string {
-  if (!s.watchEnabled) return t("關閉時只依「定時掃描間隔」更新");
-  if (appStatus?.watchError) return t("無法監看：{e}（改為定時掃描）", { e: appStatus.watchError });
+// 採集頻率的說明：即時追蹤顯示監看中的目錄數，監看不了時說明退回什麼節奏。
+function cadenceNote(s: SettingsView, appStatus: AppStatus | null): string {
+  if (s.collectionMode === "interval") {
+    return t("不監看檔案，定時掃描並同步 Cursor 與 Antigravity；每小時另外完整重掃一次");
+  }
+  if (appStatus?.watchError) {
+    return s.collectionMode === "smart"
+      ? t("無法監看：{e}（改為每 10 分鐘掃描）", { e: appStatus.watchError })
+      : t("無法監看：{e}（改為定時掃描）", { e: appStatus.watchError });
+  }
+  if (s.collectionMode === "smart") {
+    return t("工具有新紀錄時才在每 10 分鐘的檢查更新；每小時另外完整校準一次");
+  }
   if (appStatus?.watching) {
     return t("監看 {n} 個資料夾，有變動時幾秒內更新", { n: appStatus.watchRoots.length });
   }
@@ -575,20 +585,18 @@ export default function Settings() {
               onChange={(v) => void updateSettings({ syncUploadIntervalMs: v })}
             />
           </Field>
-          <Field label={t("定時掃描間隔")} hint={t("同時同步 Cursor 與 Antigravity；每小時另外完整重掃一次")}>
-            <Select<number>
-              value={s.collectionIntervalMs}
+          <Field label={t("採集頻率")} hint={cadenceNote(s, appStatus)}>
+            <Select<CollectionCadence>
+              value={cadenceOf(s)}
               options={[
-                { value: 60_000, label: t("1 分鐘") },
-                { value: 300_000, label: t("5 分鐘") },
-                { value: 900_000, label: t("15 分鐘") },
-                { value: 1_800_000, label: t("30 分鐘") },
+                { value: "live", label: t("即時追蹤") },
+                { value: "smart", label: t("智慧採集（10 分鐘）") },
+                { value: "300000", label: t("每 5 分鐘") },
+                { value: "900000", label: t("每 15 分鐘") },
+                { value: "1800000", label: t("每 30 分鐘") },
               ]}
-              onChange={(v) => void updateSettings({ collectionIntervalMs: v })}
+              onChange={(v) => void updateSettings(cadencePatch(v))}
             />
-          </Field>
-          <Field label={t("即時更新")} hint={watchNote(s, appStatus)}>
-            <Toggle checked={s.watchEnabled} onChange={(v) => void updateSettings({ watchEnabled: v })} />
           </Field>
           <Field
             label={t("保留已刪除的 session")}

@@ -22,6 +22,7 @@ const RUNTIME_FIELDS: &[&str] = &[
     "customScanPaths",
     "allTimeSince",
     "projectsEnabled",
+    "collectionMode",
     "collectionIntervalMs",
     "tokscaleTimeoutMs",
     "watchEnabled",

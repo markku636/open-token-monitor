@@ -230,7 +230,7 @@ pub async fn restart_runtime(app: &AppHandle) {
             .with_owner_email(&crate::settings::resolve_owner_email(&settings)),
         collector: CollectorConfig::from_settings(&settings),
         source,
-        collection_interval: Duration::from_millis(settings.collection_interval_ms),
+        collection_interval: Duration::from_millis(settings.collector_interval_ms()),
         history_interval: Duration::from_millis(settings.history_interval_ms),
         session_archive: settings
             .session_usage_archive_enabled
@@ -241,6 +241,7 @@ pub async fn restart_runtime(app: &AppHandle) {
         sender,
         events: Arc::new(move |event| on_core_event(&handle, event)),
         watch: WatchConfig::from_settings(&settings),
+        interval_requires_activity: settings.interval_requires_activity(),
         limits: crate::limits::runtime::LimitsConfig::from_settings(&settings),
         progressive: true,
         seed_from_anchor: state.record.read().unwrap().is_none(),

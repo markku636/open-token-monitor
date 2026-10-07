@@ -7,6 +7,8 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type WindowMode = "floating" | "normal" | "desktop" | "tray";
+/** 收集節奏（上游 `collectionMode`）：檔案一變就掃／有活動才在 10 分鐘的檢查掃／只定時掃。 */
+export type CollectionMode = "live" | "smart" | "interval";
 export type ThemeSetting = "system" | "dark" | "light";
 export type ValueSource = "cli" | "env" | "settings" | "keyring" | "baked" | "none";
 export type ClientStatus = "active" | "waiting" | "missing";
@@ -28,8 +30,11 @@ export interface Settings {
   customScanPaths: Record<string, string[]>;
   allTimeSince: string;
   projectsEnabled: boolean;
+  collectionMode: CollectionMode;
+  /** interval 模式的間隔（live 的備援）；smart 固定 10 分鐘，不用這個值。 */
   collectionIntervalMs: number;
   tokscaleTimeoutMs: number;
+  /** 由 collectionMode 推出（不是 interval 就有監看），只讀。 */
   watchEnabled: boolean;
   watchDebounceMs: number;
   sessionUsageArchiveEnabled: boolean;
@@ -86,8 +91,8 @@ export type SettingsPatch = Partial<
     | "syncUploadIntervalMs"
     | "trackedClients"
     | "projectsEnabled"
+    | "collectionMode"
     | "collectionIntervalMs"
-    | "watchEnabled"
     | "sessionUsageArchiveEnabled"
     | "historyEnabled"
     | "historyIntervalMs"
@@ -837,6 +842,7 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     customScanPaths: {},
     allTimeSince: "2024-01-01",
     projectsEnabled: true,
+    collectionMode: "live",
     collectionIntervalMs: 300_000,
     tokscaleTimeoutMs: 120_000,
     watchEnabled: true,

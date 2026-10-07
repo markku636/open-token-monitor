@@ -663,6 +663,8 @@ async fn cmd_run(
         sender: client.map(hub_sender),
         events: sink,
         watch,
+        // 上游 agent 沒有智慧採集：設定頁選了 smart，tm-agent 仍是檔案一變就掃。
+        interval_requires_activity: false,
         limits,
         progressive: false,
         seed_from_anchor: false,
@@ -707,6 +709,7 @@ async fn cmd_once(
             sender,
             events: crate::device::events::noop_sink(),
             watch: None,
+            interval_requires_activity: false,
             limits,
             progressive: false,
             seed_from_anchor: false,
@@ -1147,7 +1150,8 @@ pub async fn run(cli: Cli) -> ExitCode {
             } => {
                 let mut ctx = ctx;
                 if let Some(w) = watch {
-                    ctx.settings.watch_enabled = w.trim() != "0";
+                    // 經過收集節奏換算，底下的 validate() 才不會把它改回設定檔的值。
+                    ctx.settings.set_watch_enabled(w.trim() != "0");
                 }
                 if let Some(ms) = watch_debounce_ms {
                     ctx.settings.watch_debounce_ms = ms;
