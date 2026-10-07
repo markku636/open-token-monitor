@@ -1,0 +1,8 @@
+# Line endings are LF in the repo and in every checkout, whatever core.autocrlf says:
+# the golden JSON fixtures are compared byte for byte and the scripts run under Git Bash.
+* text=auto eol=lf
+*.ps1 text eol=lf
+*.png binary
+*.ico binary
+*.icns binary
+*.exe binary

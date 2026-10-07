@@ -1,0 +1,24 @@
+{
+  "summary": {
+    "billingCycleStart": "2026-09-01T00:00:00.000Z",
+    "billingCycleEnd": "2026-10-01T00:00:00.000Z",
+    "membershipType": "pro_plus",
+    "limitType": "user",
+    "isUnlimited": false,
+    "individualUsage": {
+      "plan": { "enabled": true, "used": 3150, "limit": 7000, "remaining": 3850, "autoPercentUsed": 18.4, "apiPercentUsed": 61.2, "totalPercentUsed": 45 },
+      "onDemand": { "enabled": true, "used": 1275, "limit": 5000, "remaining": 3725 }
+    },
+    "teamUsage": {
+      "pooled": { "used": 42000, "limit": 100000, "remaining": 58000 }
+    }
+  },
+  "me": { "email": "preview@example.com", "name": "Preview", "sub": "auth0|user_01PREVIEWUSER" },
+  "sand": {
+    "usagePercent": 42.5,
+    "currentPeriodStart": "2026-09-21T00:00:00.000Z",
+    "nextResetTimestampUtc": "2026-09-28T00:00:00.000Z",
+    "hasAvailableUsage": true,
+    "hasNonZeroIncludedLimit": true
+  }
+}

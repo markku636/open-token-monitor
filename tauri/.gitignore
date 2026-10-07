@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+# build output
+dist/
+# tauri / rust
+target/
+src-tauri/target/
+src-tauri/gen/schemas/
+# 打包時下載的 tokscale（ensure-tokscale.mjs 產生，依 sha256 驗證；不進版控）
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
+# 打包輸出（build-installer.ps1 收整的帶版號安裝檔）
+release/
+tmp/
+# env & secrets —— client secret / updater 簽章私鑰絕不進版控
+.env
+.env.*
+*.key
+*.key.pub
+*.pem
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+# logs
+*.log
+npm-debug.log*

@@ -1,0 +1,13 @@
+{
+  "plan_type": "prolite",
+  "rate_limit": {
+    "primary_window": { "used_percent": 12, "reset_at": 1770000000, "limit_window_seconds": 18000 },
+    "secondary_window": { "used_percent": "34.5", "reset_at": 1770500000, "limit_window_seconds": 2592000 }
+  },
+  "additional_rate_limits": [
+    { "limit_name": "gpt-reserve", "metered_feature": "base_model_inference", "rate_limit": { "primary_window": { "used_percent": 70, "reset_at": 1770500000, "limit_window_seconds": 604800 } } },
+    { "metered_feature": "codex_spark", "rate_limit": { "primary_window": { "used_percent": 150, "reset_at": 1770500000, "limit_window_seconds": 86400 }, "secondary_window": { "used_percent": -3, "limit_window_seconds": 21600 } } },
+    { "limit_name": "a name that is far longer than thirty-two characters", "metered_feature": "long_label", "rate_limit": { "primary_window": { "used_percent": 5, "limit_window_seconds": 3600 } } },
+    { "metered_feature": "codex", "rate_limit": { "primary_window": { "used_percent": 1 } } }
+  ]
+}

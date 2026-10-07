@@ -1,0 +1,206 @@
+{
+  "groupBy": "client,workspace,session,model",
+  "entries": [
+    {
+      "client": "claude",
+      "mergedClients": null,
+      "workspaceKey": "d--projects-alpha",
+      "workspaceLabel": "alpha",
+      "sessionId": "c-1",
+      "model": "claude-fable-5-1",
+      "provider": "anthropic",
+      "input": 13842,
+      "output": 1093283,
+      "cacheRead": 33226492,
+      "cacheWrite": 4562316,
+      "reasoning": 0,
+      "messageCount": 515,
+      "cost": 120.627918,
+      "performance": {
+        "msPer1KTokens": 12.5,
+        "totalDurationMs": 14033009,
+        "timedTokens": 38766423,
+        "sampleCount": 3,
+        "tokenCoverage": 1
+      }
+    },
+    {
+      "client": "claude",
+      "workspaceKey": "d--projects-alpha",
+      "sessionId": "c-1",
+      "model": "claude-haiku-4-5",
+      "provider": "anthropic",
+      "input": 200,
+      "output": 50,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "reasoning": 0,
+      "messageCount": 3,
+      "cost": 0.0012
+    },
+    {
+      "client": "claude",
+      "workspaceKey": "opaque-key",
+      "sessionId": "c-2",
+      "model": "Claude-Fable-5-1",
+      "provider": "Anthropic",
+      "input": 10,
+      "output": 20,
+      "cacheRead": 30,
+      "cacheWrite": 40,
+      "reasoning": 0,
+      "messageCount": 1,
+      "cost": 0.25
+    },
+    {
+      "client": "codex",
+      "workspaceKey": "c--work-beta",
+      "sessionId": "x-1",
+      "model": "gpt-5.5",
+      "provider": "openai",
+      "input": 5000,
+      "output": 700,
+      "cacheRead": 12000,
+      "cacheWrite": 0,
+      "reasoning": 333,
+      "messageCount": 12,
+      "cost": 1.75,
+      "performance": {
+        "msPer1KTokens": 12.5,
+        "totalDurationMs": 90000,
+        "timedTokens": 18000,
+        "sampleCount": 3,
+        "tokenCoverage": 1
+      }
+    },
+    {
+      "client": "copilot",
+      "workspaceKey": "home-gamma",
+      "sessionId": "p-1",
+      "model": "gpt-4.1",
+      "provider": "github",
+      "input": 900,
+      "output": 100,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "reasoning": 0,
+      "messageCount": 4,
+      "cost": 0
+    },
+    {
+      "client": "cursor",
+      "sessionId": "k-1",
+      "model": "auto",
+      "input": 42,
+      "output": 8,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "reasoning": 0,
+      "messageCount": 1,
+      "cost": 0.004
+    },
+    {
+      "client": "micode-desktop",
+      "sessionId": "m-1",
+      "model": "mimo-v2",
+      "input": 11,
+      "output": 4,
+      "cost": 0.0002
+    },
+    {
+      "client": "reasonix",
+      "sessionId": "reasonix:r-1",
+      "model": "deepseek/deepseek-v4",
+      "input": 77,
+      "output": 3,
+      "cost": 0.001
+    },
+    {
+      "model": "orphan-model",
+      "input": 5,
+      "output": 5,
+      "cost": 0.01
+    },
+    {
+      "client": "codex",
+      "workspaceKey": "e--repos-gamma",
+      "workspaceLabel": "gamma",
+      "sessionId": "x-new",
+      "model": "gpt-5.5",
+      "provider": "openai",
+      "input": 5100,
+      "output": 900,
+      "cacheRead": 64000,
+      "cacheWrite": 0,
+      "reasoning": 350,
+      "messageCount": 4,
+      "cost": 0.08125
+    }
+  ],
+  "sessions": [
+    {
+      "client": "claude",
+      "sessionId": "c-1",
+      "firstActiveMs": 1790150000000,
+      "lastActiveMs": 1790156794179,
+      "title": "Refactor the parser"
+    },
+    {
+      "client": "claude",
+      "sessionId": "c-2",
+      "firstActiveMs": 0,
+      "lastActiveMs": 1790157505715
+    },
+    {
+      "client": "codex",
+      "sessionId": "x-1",
+      "firstActiveMs": 1790140000123,
+      "lastActiveMs": 1790141000456
+    },
+    {
+      "client": "copilot",
+      "sessionId": "p-1",
+      "firstActiveMs": 1790130000000,
+      "lastActiveMs": 1790131000000
+    },
+    {
+      "client": "codex",
+      "sessionId": "x-new",
+      "firstActiveMs": 1790160000000,
+      "lastActiveMs": 1790160300000
+    }
+  ],
+  "workspaces": [
+    {
+      "workspaceKey": "d--projects-alpha",
+      "label": "alpha",
+      "path": "D:ProjectsAlpha\\"
+    },
+    {
+      "workspaceKey": "c--work-beta",
+      "label": "beta",
+      "path": "c:/work/beta"
+    },
+    {
+      "workspaceKey": "opaque-key",
+      "label": "opaque"
+    },
+    {
+      "workspaceKey": "home-gamma",
+      "label": "gamma",
+      "path": "/home/dev/gamma"
+    },
+    {
+      "workspaceKey": "e--repos-gamma",
+      "label": "gamma",
+      "path": "E:\\Repos\\Gamma"
+    }
+  ],
+  "totalInput": 19777,
+  "totalOutput": 1089973,
+  "totalCacheRead": 0,
+  "totalCacheWrite": 0,
+  "totalMessages": 0,
+  "totalCost": 121.91019300000002,
+  "processingTimeMs": 12
+}

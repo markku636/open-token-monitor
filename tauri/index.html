@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Token Monitor</title>
+    <script>
+      // React 掛載前先套用介面語言、主題與視圖（widget / settings），避免首幀跳動。
+      // 判準與 i18n.ts 的 resolveLang、store.ts 的 applyTheme 一致。
+      (function () {
+        try {
+          var lang = localStorage.getItem("tm:lang");
+          var en = lang === "en" || (lang !== "zh-TW" && !/^zh/i.test(navigator.language || "zh"));
+          document.documentElement.lang = en ? "en" : "zh-Hant";
+        } catch (e) {}
+        try {
+          var theme = localStorage.getItem("tm:theme") || "system";
+          var light = theme === "light" || (theme !== "dark" && matchMedia("(prefers-color-scheme: light)").matches);
+          if (light) document.documentElement.classList.add("light");
+        } catch (e) {}
+        try {
+          var view = new URLSearchParams(location.search).get("view");
+          document.documentElement.dataset.view = ["settings", "dock", "dashboard"].indexOf(view) >= 0 ? view : "widget";
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // 視窗以 visible:false 啟動：首次繪製（雙 rAF）後才請 Rust 顯示，消除白屏 / 黑框閃爍。
+      // 非 Tauri 環境（瀏覽器 / vite preview）靜默略過。Rust 端另有 4 秒保險絲。
+      window.addEventListener("DOMContentLoaded", function () {
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            try {
+              window.__TAURI__ && window.__TAURI__.core.invoke("window_show_ready");
+            } catch (e) {}
+          });
+        });
+      });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "widget、設定視窗、儀表板與邊緣額度條。所有特權動作（上傳、更新、開機啟動、tray）都在 Rust 端，前端只需要拖曳與縮放視窗。",
+  "windows": ["main", "settings", "dock", "dashboard"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "core:window:allow-hide",
+    "core:window:allow-close"
+  ]
+}

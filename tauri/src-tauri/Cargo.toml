@@ -1,0 +1,118 @@
+[package]
+name = "token-monitor"
+version = "0.1.0"
+description = "Token Monitor employee client (Tauri 2 + Rust)"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+# 兩個 binary（GUI: token-monitor / CLI: tm-agent）。明確指定 GUI 為預設主程式，
+# 否則 `tauri build` 在多 binary 間可能選錯、誤把 CLI 打包成主程式。
+default-run = "token-monitor"
+
+[lib]
+name = "token_monitor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# 桌面 widget（Tauri）。--no-default-features 的精簡建置會略過此 bin。
+[[bin]]
+name = "token-monitor"
+path = "src/main.rs"
+required-features = ["gui"]
+
+# 無頭代理程式：收集 + 上傳，不連 Tauri / WebView，--no-default-features 也能單獨編譯。
+[[bin]]
+name = "tm-agent"
+path = "src/bin/tm_agent.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# ---- GUI（全部 optional，掛在 `gui` feature 後）----
+tauri = { version = "2", features = ["tray-icon", "image-png"], optional = true }
+tauri-plugin-single-instance = { version = "2", optional = true }
+tauri-plugin-window-state = { version = "2", optional = true }
+tauri-plugin-autostart = { version = "2", optional = true }
+tauri-plugin-opener = { version = "2", optional = true }
+# 自動更新：從公司 hub 的 /updates/latest.json 取 feed，以編譯時內建的 minisign 公鑰驗章。
+tauri-plugin-updater = { version = "2", optional = true }
+# widget 的全域顯示／隱藏快捷鍵（上游 main.js `configureWindowToggleShortcut` 用 Electron globalShortcut）。
+tauri-plugin-global-shortcut = { version = "2", optional = true }
+# 資料匯出的「選擇資料夾」（上游用 Electron dialog.showOpenDialog）；Tauri 官方的檔案對話框 plugin。
+tauri-plugin-dialog = { version = "2", optional = true }
+
+# ---- 核心（GUI 與 tm-agent 共用，不得依賴 Tauri）----
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs", "time", "sync", "io-util", "signal"] }
+tokio-util = "0.7"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive", "rc"] }
+# preserve_order：tokscale 輸出以 Value 解析，鍵序穩定才能跟上游 JSON.stringify 的結果逐鍵比對；
+# wire 結構裡的 clients / models / sessions 也依插入序輸出，golden diff 才讀得懂。
+serde_json = { version = "1", features = ["preserve_order"] }
+indexmap = { version = "2", features = ["serde"] }
+# rustls-tls-native-roots：以 Windows 憑證庫為信任根 → 企業內部 CA 簽的 hub 憑證直接可信。
+# 絕不開 default-tls / native-tls（OpenSSL）；reqwest 0.12 的 rustls 走 ring，不需要 NASM。
+# gzip：hub 對 ≥ 1 KiB 的 JSON 回應會 gzip（上游 src/shared/http.js）。
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json", "stream", "gzip"] }
+url = "2"
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock", "std"] }
+iana-time-zone = "0.1"
+thiserror = "2"
+clap = { version = "4", features = ["derive", "env"] }
+dirs = "6"
+sha2 = "0.10"
+base64 = "0.22"
+gethostname = "1"
+unicode-normalization = "0.1"
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+# 讀 Cursor 桌面版的 state.vscdb（SQLite）取得登入 token，對齊上游 providers/cursor/auth.js。
+# bundled：自帶 SQLite 原始碼以 MSVC 編譯，不依賴系統 DLL。
+rusqlite = { version = "0.32", features = ["bundled"] }
+# hub 串流的 gzip：fork 的 hub 每個 SSE frame 送一個獨立的 gzip member，reqwest 的自動解壓
+# 在第二個 member 就報「extra bytes」，所以串流自己用 MultiGzDecoder 邊收邊解（已在相依樹裡）。
+flate2 = "1"
+# 來源目錄的檔案事件（Windows 為 ReadDirectoryChangesW）→ 3–5 秒內的 anchored tick（上游用 chokidar）。
+notify = "8"
+
+[target.'cfg(windows)'.dependencies]
+# client secret 的覆寫（金鑰輪替）存 Windows 認證管理員，不落地設定檔。
+keyring = { version = "3", features = ["windows-native"] }
+# osName / osVersion：讀 HKLM\...\Windows NT\CurrentVersion（對齊上游 src/shared/osVersion.js）。
+winreg = "0.55"
+# 工作列上方重新置頂（gui/taskbar.rs）與圓角（gui/chrome.rs）：SetWindowPos、前景事件 hook、
+# DwmSetWindowAttribute。與 tao / tauri 同一個版本與 feature 集合，沒有多編譯任何東西。
+windows = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service"] }
+
+[dev-dependencies]
+tempfile = "3"
+pretty_assertions = "1"
+# hub/stream.rs 的測試用本機 TCP 假伺服器。
+tokio = { version = "1", features = ["net"] }
+[features]
+default = ["gui"]
+gui = [
+  "dep:tauri",
+  "dep:tauri-plugin-single-instance",
+  "dep:tauri-plugin-window-state",
+  "dep:tauri-plugin-autostart",
+  "dep:tauri-plugin-opener",
+  "dep:windows",
+  "dep:tauri-plugin-global-shortcut",
+  "dep:tauri-plugin-dialog",
+  "dep:tauri-plugin-updater",
+]
+custom-protocol = ["gui", "tauri/custom-protocol"]
+
+# Release 瘦身（保守設定）：thin LTO 平行、連結期記憶體峰值低；strip 去 symbol table。
+[profile.release]
+lto = "thin"
+strip = "symbols"
