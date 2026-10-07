@@ -1,0 +1,11 @@
+{
+  "available_count": 3,
+  "credits": [
+    { "id": "later", "status": "available", "expires_at": "2026-01-20T00:39:53.731630Z" },
+    { "id": "expired", "status": "available", "expires_at": "2025-12-20T00:00:00Z" },
+    { "id": "earlier", "status": "available", "expires_at": "2026-01-05T04:03:43.263391Z" },
+    { "id": "redeemed", "status": "redeemed", "expires_at": "2026-01-10T00:00:00Z" },
+    { "id": "same-time", "status": "AVAILABLE", "expiresAt": "2026-01-05T04:03:43.263Z" },
+    { "id": "no-date", "status": "available" }
+  ]
+}

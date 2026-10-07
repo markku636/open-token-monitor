@@ -223,6 +223,29 @@ export interface LimitWindow {
   showMeter: boolean;
 }
 
+/** Claude 的一張重置券（wire 的 `resetCredits.grants[]`）；每個欄位都是有值才有。 */
+export interface ResetGrant {
+  id?: string;
+  label?: string;
+  resetsLeft?: number;
+  resetsTotal?: number;
+  startsAt?: string;
+  endsAt?: string;
+  /** 會清掉的窗口 id（`five_hour`、`seven_day`、`seven_day_opus`…）。 */
+  clears?: string[];
+  usableNow?: boolean;
+  useRequiresLimit?: boolean;
+  paused?: boolean;
+}
+
+/** 額度重置券：Codex 的 rate-limit reset credits、Claude 的 usage-limit reset grants。 */
+export interface ResetCredits {
+  availableCount: number | null;
+  nextExpiresAt: string | null;
+  expirations?: string[];
+  grants?: ResetGrant[];
+}
+
 export interface LimitProvider {
   provider: string;
   accountKey: string;
@@ -232,6 +255,7 @@ export interface LimitProvider {
   source: string;
   updatedAt: string | null;
   windows: LimitWindow[];
+  resetCredits?: ResetCredits | null;
 }
 
 export interface LimitsView {
@@ -695,6 +719,15 @@ function mockLimits(now: string): LimitsView {
           win("weekly", "Fable", 92, 90),
           { ...win("billing", "Usage credits", 11.75, 400), metric: "spend", used: 2.35, limit: 20, currency: "USD", resetsAt: null },
         ],
+        resetCredits: {
+          availableCount: 2,
+          nextExpiresAt: inHours(30),
+          expirations: [inHours(30), inHours(200)],
+          grants: [
+            { id: "launch", label: "Launch promo reset", resetsLeft: 1, resetsTotal: 1, endsAt: inHours(30), clears: ["five_hour", "seven_day", "seven_day_overage_included"], usableNow: true },
+            { id: "limit-only", label: "Limit reset", resetsLeft: 1, resetsTotal: 2, endsAt: inHours(200), clears: ["seven_day"], useRequiresLimit: true },
+          ],
+        },
       },
       { provider: "codex", accountKey: "", accountLabel: "", accountEmail: "", status: "notConfigured", source: "", updatedAt: now, windows: [] },
     ],

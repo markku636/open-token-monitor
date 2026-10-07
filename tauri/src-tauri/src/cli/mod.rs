@@ -161,7 +161,7 @@ enum Command {
         /// 印 JSON（LimitsSummary）
         #[arg(long)]
         json: bool,
-        /// 相容測試用：不連網，以目錄裡的 claude-usage.json / codex-usage.json 跑對應，印 JSON
+        /// 相容測試用：不連網，以目錄裡的 claude-usage.json / codex-usage.json（+ codex-reset-credits.json）等 API 回應跑對應，印 JSON
         #[arg(long, hide = true)]
         replay: Option<PathBuf>,
     },
@@ -771,20 +771,31 @@ fn cmd_limits_replay(dir: &std::path::Path) -> AppResult<()> {
             Err(e) => Err(AppError::Storage(e.to_string())),
         }
     };
+    // 重置券的到期判斷也用這個固定時間。
+    let at_ms = chrono::DateTime::parse_from_rfc3339(AT)
+        .map(|d| d.timestamp_millis())
+        .unwrap_or_default();
     let mut providers = Vec::new();
     if let Some(u) = read("claude-usage.json")? {
         providers.push(finish_provider(LimitProvider {
             source: "oauth".into(),
             windows: crate::limits::claude::map_usage(&u),
+            reset_credits: crate::limits::claude::reset_credits(&u, at_ms),
             ..LimitProvider::status_row("claude", ProviderStatus::Ok, AT.into())
         }));
     }
     if let Some(u) = read("codex-usage.json")? {
+        use crate::limits::codex;
         let plan = u.get("plan_type").and_then(|v| v.as_str()).unwrap_or("");
+        // `codex-reset-credits.json` 是 rate-limit-reset-credits 的回應；壞回應與沒有這個檔
+        // 都等於那次呼叫失敗（正式探測同樣吞掉錯誤）。
+        let fetched = read("codex-reset-credits.json")?
+            .and_then(|r| codex::parse_reset_credits_payload(&r, at_ms).ok());
         providers.push(finish_provider(LimitProvider {
             source: "oauth".into(),
             account_label: crate::limits::plan::codex_plan_label(plan),
-            windows: crate::limits::codex::map_usage(&u),
+            windows: codex::map_usage(&u),
+            reset_credits: codex::resolve_reset_credits(&u, fetched.as_ref()),
             ..LimitProvider::status_row("codex", ProviderStatus::Ok, AT.into())
         }));
     }
@@ -839,6 +850,18 @@ async fn cmd_limits(ctx: Context, json: bool) -> AppResult<()> {
                 w.label,
                 pct,
                 w.resets_at.as_deref().unwrap_or("-")
+            );
+        }
+        // 重置券：可用的次數與最近的到期時間。
+        if let Some(rc) = &p.reset_credits {
+            println!(
+                "   {:<8} {:<14} {:>7}  expires {}",
+                "credits",
+                "reset credits",
+                rc.available_count
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "-".into()),
+                rc.next_expires_at.as_deref().unwrap_or("-")
             );
         }
     }

@@ -13,5 +13,16 @@
     "used": { "amount_minor": 235, "currency": "usd", "exponent": 2 },
     "limit": { "amount_minor": 2000, "currency": "USD", "exponent": 2 },
     "percent": 12
+  },
+  "cedar_ember": {
+    "eligible": true,
+    "grants": [
+      { "id": "later-promo", "label": "Later promo reset", "resets_left": 2, "resets_total": 2, "starts_at": "2025-12-01T00:00:00Z", "ends_at": "2026-03-01T00:00:00.123456+00:00", "clears": ["seven_day"], "usable_now": true, "use_requires_limit": false, "paused": false },
+      { "id": "spent", "label": "Spent reset", "resets_left": 0, "resets_total": 1, "ends_at": "2026-02-01T00:00:00Z", "clears": ["five_hour"], "usable_now": false },
+      { "id": "lapsed", "label": "Lapsed reset", "resets_left": 1, "resets_total": 1, "ends_at": "2025-12-15T00:00:00Z", "clears": ["five_hour"] },
+      { "id": "launch-promo", "label": "Launch promo reset: thanks for trying the new model, this one clears every limit", "resets_left": 1, "resets_total": 1, "starts_at": "2025-12-20T00:00:00Z", "ends_at": "2026-01-15T00:00:00Z", "clears": ["five_hour", "seven_day", "seven_day_overage_included"], "usable_now": true, "use_requires_limit": false, "paused": false },
+      { "id": 42, "label": "Limit-only reset", "resets_left": "1.5", "resets_total": "2", "ends_at": "", "clears": ["seven_day_opus", "", "seven_day_opus", "seven_day_new_bucket"], "usable_now": null, "use_requires_limit": true, "paused": null },
+      { "label": "Paused reset", "resets_left": 1, "ends_at": "2026-01-15T00:00:00.000Z", "paused": true }
+    ]
   }
 }

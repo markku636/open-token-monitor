@@ -473,6 +473,157 @@ test("limits: Claude and Codex usage map exactly like upstream", { skip }, () =>
   assert.ok(!byId.claude.windows.some((w) => w.label === "Opus"), "other scoped weeklies are dropped");
 });
 
+// 額度重置券：`tm-agent limits --replay` 的時間固定在這一刻（過期判斷也用它）。
+const REPLAY_AT = "2026-01-01T00:00:00.000Z";
+const LIMITS_FIXTURE = path.join(root, "src-tauri", "tests", "fixtures", "limits");
+
+function replayLimits(bin, dir) {
+  const res = spawnSync(bin, ["limits", "--replay", dir], { encoding: "utf8" });
+  assert.equal(res.status, 0, res.stderr);
+  return Object.fromEntries(JSON.parse(res.stdout).providers.map((p) => [p.provider, p]));
+}
+
+// 每個情境一個暫存的 replay 目錄；檔案內容是 undefined 時不寫（= 那個 API 呼叫失敗）。
+function withReplayDir(files, fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tm-compat-limits-"));
+  try {
+    for (const [name, content] of Object.entries(files)) {
+      if (content !== undefined) fs.writeFileSync(path.join(dir, name), JSON.stringify(content));
+    }
+    return fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// 上游 fetchCodexLimits 的真實流程（usage → rate-limit-reset-credits → 合併），以 deps 注入
+// auth.json 與 fetch。`resetCredits` 是 undefined 時那次呼叫回 503（上游吞掉錯誤）。
+async function upstreamCodexReplay(usage, resetCredits) {
+  const core = up("limits/core.js");
+  const codexLimits = require(path.join(REPO, "src", "shared", "providers", "codex", "limits.js"));
+  const requests = [];
+  const provider = await codexLimits.fetchCodexLimits(
+    {},
+    {
+      now: () => Date.parse(REPLAY_AT),
+      env: { CODEX_HOME: "/compat/codex" },
+      codexAuthPath: "/compat/codex/auth.json",
+      readFileSync: (file) => {
+        if (String(file).endsWith("auth.json")) return JSON.stringify({ tokens: { access_token: "replay" } });
+        throw new Error(`no ${file}`);
+      },
+      fetch: async (url, init) => {
+        requests.push({ url, headers: init.headers });
+        if (url.endsWith("/rate-limit-reset-credits")) {
+          return resetCredits === undefined
+            ? { ok: false, status: 503, headers: { get: () => "" }, json: async () => ({}) }
+            : { ok: true, status: 200, json: async () => resetCredits };
+        }
+        return { ok: true, status: 200, json: async () => usage };
+      },
+      readCodexRpc: async () => {
+        throw new Error("the OAuth path must not fall back to RPC");
+      },
+    },
+  );
+  return { provider: plain(core.normalizeLimitProvider(provider)), requests };
+}
+
+test("limits: Claude reset grants map exactly like upstream", { skip }, () => {
+  const bin = agentBin();
+  const core = up("limits/core.js");
+  const claudeLimits = require(path.join(REPO, "src", "shared", "providers", "claude", "limits.js"));
+  const theirs = (usage) =>
+    plain(core.normalizeLimitProvider(claudeLimits.mapClaudeUsageToProvider(usage, { now: Date.parse(REPLAY_AT) }))).resetCredits;
+
+  const fixture = JSON.parse(fs.readFileSync(path.join(LIMITS_FIXTURE, "claude-usage.json"), "utf8"));
+  const ours = replayLimits(bin, LIMITS_FIXTURE).claude.resetCredits;
+  assertSame(ours, theirs(fixture), "fixture resetCredits");
+  assert.equal(ours.availableCount, 5, "spent and lapsed grants are not counted");
+  assert.equal(ours.grants.length, 4);
+
+  // 各種邊界：空區塊、全部用完、JS 的 Number() / Date.parse() / truthiness。
+  const grant = (over) => ({ id: "g", label: "Reset", resets_left: 1, ends_at: "2026-02-01T00:00:00Z", ...over });
+  const cases = [
+    null,
+    {},
+    { grants: [] },
+    { grants: "not a list" },
+    [grant({})],
+    { grants: [grant({ resets_left: 0 }), grant({ ends_at: "2025-12-31T23:59:59Z" }), grant({ ends_at: REPLAY_AT })] },
+    { grants: [null, "x", 3, [grant({})], grant({ resets_left: "2%" }), grant({ resets_left: "abc" })] },
+    { grants: [grant({ resets_left: true, ends_at: 1767225600 }), grant({ resets_left: "0x2", ends_at: false })] },
+    { grants: [grant({ resets_left: "Infinity" })] },
+    { grants: [grant({ resets_left: 0.5, id: "", label: 0, starts_at: "bad date" })] },
+    {
+      grants: [
+        grant({ ends_at: "2026-03-01T08:00:00+08:00", clears: ["five_hour", 7, null, "  seven_day  ", "five_hour"] }),
+        grant({ ends_at: "2026-03-01T00:00:00Z", usable_now: 0, use_requires_limit: "yes", paused: undefined }),
+        grant({ ends_at: undefined, usable_now: null, paused: null, clears: "five_hour" }),
+      ],
+    },
+  ];
+  cases.forEach((cedar_ember, i) => {
+    const usage = { five_hour: { utilization: 1 }, cedar_ember };
+    withReplayDir({ "claude-usage.json": usage }, (dir) => {
+      assertSame(replayLimits(bin, dir).claude.resetCredits, theirs(usage), `claude case ${i}`);
+    });
+  });
+});
+
+test("limits: Codex reset credits follow upstream's reset-credits call", { skip }, async () => {
+  const bin = agentBin();
+  const read = (name) => JSON.parse(fs.readFileSync(path.join(LIMITS_FIXTURE, name), "utf8"));
+
+  const usage = read("codex-usage.json");
+  const { provider: theirs, requests } = await upstreamCodexReplay(usage, read("codex-reset-credits.json"));
+  const ours = replayLimits(bin, LIMITS_FIXTURE).codex;
+  assert.deepEqual(
+    requests.map((r) => r.url),
+    ["https://chatgpt.com/backend-api/wham/usage", "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"],
+    "upstream asks for reset credits once, after usage",
+  );
+  assertSame(ours.resetCredits, theirs.resetCredits, "fixture resetCredits");
+  assertSame(ours.windows, theirs.windows, "codex windows through fetchCodexLimits");
+  assert.equal(ours.resetCredits.availableCount, 3, "the API count wins over the usage payload's");
+
+  // API 失敗、壞回應、缺欄位時與 usage 回應本身帶的合併。
+  const base = { plan_type: "plus", rate_limit: { primary_window: { used_percent: 4, limit_window_seconds: 18000 } } };
+  const cases = [
+    [base, undefined],
+    [base, { available_count: 0 }],
+    [{ ...base, rate_limit_reset_credits: { available_count: 4, next_expires_at: "2026-01-09T00:00:00Z" } }, undefined],
+    [{ ...base, rate_limit_reset_credits: { available_count: 4 } }, { available_count: -1 }],
+    [{ ...base, rate_limit_reset_credits: { available_count: 4 } }, { availableCount: "many" }],
+    [
+      { ...base, rate_limit_reset_credits: { available_count: 4, next_expires_at: "2026-01-09T00:00:00Z", expires_at_list: ["2026-01-10T00:00:00Z", "2026-01-09T00:00:00Z"] } },
+      { available_count: "1.9" },
+    ],
+    [{ ...base, rateLimitResetCredits: { available: 6, credits: [{ status: "available", expires_at: "2026-01-03T00:00:00Z" }, { status: "used", expires_at: "2026-01-02T00:00:00Z" }] } }, undefined],
+    [{ ...base, rate_limit_reset_credits: {} }, undefined],
+    [{ ...base, rate_limit_reset_credits: 0, rateLimitResetCredits: { remaining_count: 2 } }, undefined],
+    [
+      base,
+      {
+        availableCount: 2,
+        credits: [
+          { status: "Available", expiresAt: "2026-01-04T00:00:00Z" },
+          { status: "available", expires_at: 1767571200 },
+          { status: "available", expires_at: null, expiresAt: "2026-01-06T00:00:00Z" },
+          { status: "available", expires_at: "2025-12-31T00:00:00Z" },
+          "available",
+        ],
+      },
+    ],
+  ];
+  for (const [i, [caseUsage, resetCredits]] of cases.entries()) {
+    const { provider } = await upstreamCodexReplay(caseUsage, resetCredits);
+    withReplayDir({ "codex-usage.json": caseUsage, "codex-reset-credits.json": resetCredits }, (dir) => {
+      assertSame(replayLimits(bin, dir).codex.resetCredits, provider.resetCredits, `codex case ${i}`);
+    });
+  }
+});
+
 // 同一個設定目錄連跑兩次：第二次 client 已經刪掉 c-2 的紀錄。我們補回來的結果要與上游
 // updateSessionUsageArchive + applySessionUsageArchive（+ applyProjectRollups）完全相同。
 test("session usage archive: deleted sessions come back exactly like upstream", { skip }, () => {

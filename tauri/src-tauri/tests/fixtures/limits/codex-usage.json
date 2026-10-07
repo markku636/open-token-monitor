@@ -9,5 +9,6 @@
     { "metered_feature": "codex_spark", "rate_limit": { "primary_window": { "used_percent": 150, "reset_at": 1770500000, "limit_window_seconds": 86400 }, "secondary_window": { "used_percent": -3, "limit_window_seconds": 21600 } } },
     { "limit_name": "a name that is far longer than thirty-two characters", "metered_feature": "long_label", "rate_limit": { "primary_window": { "used_percent": 5, "limit_window_seconds": 3600 } } },
     { "metered_feature": "codex", "rate_limit": { "primary_window": { "used_percent": 1 } } }
-  ]
+  ],
+  "rate_limit_reset_credits": { "available_count": 9, "next_expires_at": "2026-01-02T00:00:00Z" }
 }

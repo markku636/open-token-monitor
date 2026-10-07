@@ -6,7 +6,9 @@ pub mod period;
 pub mod record;
 pub mod time;
 
-pub use limits::{LimitProvider, LimitWindow, LimitsSummary, ProviderStatus, WindowKind};
+pub use limits::{
+    LimitProvider, LimitWindow, LimitsSummary, ProviderStatus, ResetCredits, ResetGrant, WindowKind,
+};
 pub use period::{Capabilities, CostMap, CountMap, Period, Project, Session};
 pub use record::{ClientStatus, DeviceRecord, Envelope, UsageSummary};
 pub use time::{PeriodWindow, PeriodWindows};

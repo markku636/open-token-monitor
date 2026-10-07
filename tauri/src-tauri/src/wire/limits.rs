@@ -147,9 +147,51 @@ pub struct LimitProvider {
     #[serde(default)]
     pub balance: Option<Value>,
     #[serde(default)]
-    pub reset_credits: Option<Value>,
+    pub reset_credits: Option<ResetCredits>,
     #[serde(default)]
     pub region: String,
+}
+
+/// 額度重置券（上游 core.js `normalizeProviderResetCredits` 的輸出）：Codex 的 rate-limit reset
+/// credits 與 Claude 的 usage-limit reset grants 共用這個形狀。`expirations`、`grants` 是空的時候
+/// 整個鍵不送。次數是 JS 的 number（`Math.floor` 之後），照其他欄位的慣例用 f64。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetCredits {
+    #[serde(default)]
+    pub available_count: Option<f64>,
+    #[serde(default)]
+    pub next_expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expirations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grants: Vec<ResetGrant>,
+}
+
+/// Claude 每一張重置券的明細（上游 `normalizeResetCreditGrants`）；每個欄位都是有值才送。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetGrant {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_left: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_total: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starts_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clears: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usable_now: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_requires_limit: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused: Option<bool>,
 }
 
 impl LimitProvider {

@@ -3,9 +3,11 @@
 //! - 憑證：`$CODEX_HOME|~/.codex/auth.json`（Codex CLI 寫的）。不換 token：上游靠 Codex 的
 //!   app-server RPC 讓 CLI 自己換，v1 沒有 RPC，401 就一直是 unauthorized，直到使用者的 Codex 換好。
 //! - 用量：`GET <base>/wham/usage`，帶 `chatgpt-account-id`（小寫）與 FedRAMP 標頭。
+//! - 重置券：用量成功後再 `GET <base>/wham/rate-limit-reset-credits`（上游 `withCodexOAuthResetCredits`），
+//!   每次 probe 一次、4 秒逾時；失敗只是這一輪沒有 API 的重置券，**不會**讓整個 probe 失敗。
 //! - 身分：`accountKey = hash("codex", email + "\0" + account_id)`，與上游位元相同。
 //!
-//! 不做（v1）：app-server RPC、多帳號切換、reset-credits 查詢、WSL。
+//! 不做（v1）：app-server RPC、多帳號切換、WSL。
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -15,12 +17,17 @@ use serde_json::{Map, Value};
 
 use super::hash::hash_key;
 use super::http::{fetch_json, FetchOptions, ProbeError};
-use super::normalize::{as_number, finish_provider, iso_timestamp};
+use super::normalize::{
+    as_number, date_parse_ms, finish_provider, is_js_object, iso_timestamp, js_number, nullish,
+};
 use super::plan::codex_plan_label;
-use crate::wire::{LimitProvider, LimitWindow, ProviderStatus, WindowKind};
+use crate::usage::js::{to_js_string, truthy};
+use crate::wire::{LimitProvider, LimitWindow, ProviderStatus, ResetCredits, WindowKind};
 
 pub const DEFAULT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// 上游 `codexResetCreditsTimeoutMs` 的預設值。
+const RESET_CREDITS_TIMEOUT: Duration = Duration::from_secs(4);
 
 pub struct CodexEnv {
     pub codex_home: PathBuf,
@@ -210,14 +217,174 @@ pub fn usage_url(base: &str) -> String {
     }
 }
 
-fn js_number(v: Option<&Value>) -> Option<f64> {
-    // 上游 `Number(x)`：缺值是 NaN（→ None），null 是 0，字串照數字解析。
-    match v {
-        None => None,
-        Some(Value::Null) => Some(0.0),
-        Some(Value::String(s)) if s.trim().is_empty() => Some(0.0),
-        Some(other) => as_number(other),
+/// 上游 `CODEX_BACKEND_PATHS.*.resetCredits`：路徑樣式跟著 usage 走。
+pub fn reset_credits_url(base: &str) -> String {
+    if base.contains("/backend-api") {
+        format!("{base}/wham/rate-limit-reset-credits")
+    } else {
+        format!("{base}/api/codex/rate-limit-reset-credits")
     }
+}
+
+/// 上游 `parseCodexResetCreditsPayload`：reset-credits API 的回應 → 正規化前的中間形狀。
+/// 次數不是非負數字就是壞回應（上游丟 unavailable，由呼叫端吞掉）；到期時間只收
+/// `status: available` 而且還沒過期的，由早到晚。
+pub fn parse_reset_credits_payload(payload: &Value, now_ms: i64) -> Result<Value, ProbeError> {
+    let available = js_number(nullish(&[
+        payload.get("available_count"),
+        payload.get("availableCount"),
+    ]));
+    if !available.is_finite() || available < 0.0 {
+        return Err(ProbeError::new(
+            ProviderStatus::Unavailable,
+            "Invalid Codex reset credits response",
+        ));
+    }
+    let mut expirations: Vec<i64> = Vec::new();
+    for credit in payload
+        .get("credits")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let status = credit
+            .get("status")
+            .filter(|v| truthy(v))
+            .map(to_js_string)
+            .unwrap_or_default()
+            .to_lowercase();
+        if status != "available" {
+            continue;
+        }
+        let expires = nullish(&[credit.get("expires_at"), credit.get("expiresAt")]);
+        match expires.and_then(date_parse_ms) {
+            Some(ms) if ms > now_ms => expirations.push(ms),
+            _ => {}
+        }
+    }
+    expirations.sort_unstable();
+    let isos: Vec<Value> = expirations
+        .into_iter()
+        .filter_map(super::normalize::iso_millis)
+        .map(Value::String)
+        .collect();
+    let mut out = Map::new();
+    out.insert(
+        "availableCount".into(),
+        serde_json::Number::from_f64(available.floor())
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+    );
+    out.insert(
+        "nextExpiresAt".into(),
+        isos.first().cloned().unwrap_or(Value::Null),
+    );
+    if !isos.is_empty() {
+        out.insert("expirations".into(), Value::Array(isos));
+    }
+    Ok(Value::Object(out))
+}
+
+/// 上游 `mergeCodexResetCredits`：API 的結果優先，缺的欄位才用 usage 回應本身帶的。
+pub fn merge_reset_credits(primary: Option<&Value>, fallback: Option<&Value>) -> Option<Value> {
+    let first = primary.filter(|v| is_js_object(v));
+    let second = fallback.filter(|v| is_js_object(v));
+    let (f, s) = match (first, second) {
+        (None, s) => return s.cloned(),
+        (Some(f), None) => return Some(f.clone()),
+        (Some(f), Some(s)) => (f, s),
+    };
+    let pick = |keys: &[&str]| -> Option<Value> {
+        let candidates: Vec<Option<&Value>> = [f, s]
+            .iter()
+            .flat_map(|o| keys.iter().map(move |k| o.get(*k)))
+            .collect();
+        nullish(&candidates).cloned()
+    };
+    let mut out = Map::new();
+    // 值為 undefined 的鍵在上游等於沒有這個鍵，所以 None 就不寫。
+    if let Some(v) = pick(&["availableCount", "available_count"]) {
+        out.insert("availableCount".into(), v);
+    }
+    if let Some(v) = pick(&[
+        "nextExpiresAt",
+        "next_expires_at",
+        "expiresAt",
+        "expires_at",
+    ]) {
+        out.insert("nextExpiresAt".into(), v);
+    }
+    if let Some(v) = pick(&[
+        "expirations",
+        "expirationTimes",
+        "expiresAtList",
+        "expires_at_list",
+    ])
+    .filter(truthy)
+    {
+        out.insert("expirations".into(), v);
+    }
+    Some(Value::Object(out))
+}
+
+/// 上游 `codexResetCreditsSnapshot`：usage 回應本身帶的 reset credits（第一個 truthy 的）。
+/// wham 形狀的回應在上游會先轉成新的 rateLimits 物件，裡面不會有 reset credits，
+/// 所以只剩頂層這兩個鍵（RPC 的形狀 v1 不支援，見檔頭）。
+fn usage_reset_credits(usage: &Value) -> Option<&Value> {
+    [
+        usage.get("rateLimitResetCredits"),
+        usage.get("rate_limit_reset_credits"),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|v| truthy(v))
+}
+
+/// usage 回應 + reset-credits API 的中間形狀（API 失敗時是 None）→ wire 的 `resetCredits`
+///（上游 `withCodexOAuthResetCredits` → `mapCodexRateLimitsToProvider` → `normalizeLimitProvider`）。
+pub fn resolve_reset_credits(usage: &Value, fetched: Option<&Value>) -> Option<ResetCredits> {
+    let existing = usage_reset_credits(usage);
+    let merged = match fetched {
+        Some(api) => merge_reset_credits(Some(api), existing),
+        None => existing.cloned(),
+    };
+    merged.as_ref().and_then(super::reset_credits::normalize)
+}
+
+/// 上游 `codexOAuthRequestHeaders`：usage 與 reset-credits 共用。
+fn oauth_get(http: &reqwest::Client, url: &str, auth: &CodexAuth) -> reqwest::RequestBuilder {
+    let mut req = http
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .bearer_auth(&auth.access_token);
+    if !auth.account_id.is_empty() {
+        req = req.header("chatgpt-account-id", &auth.account_id);
+    }
+    if auth.is_fedramp {
+        req = req.header("x-openai-fedramp", "true");
+    }
+    req
+}
+
+/// 上游 `fetchCodexResetCredits`：另外帶 Codex Desktop 的 `openai-beta` 與 `originator`。
+async fn fetch_reset_credits(
+    http: &reqwest::Client,
+    base: &str,
+    auth: &CodexAuth,
+) -> Result<Value, ProbeError> {
+    let req = oauth_get(http, &reset_credits_url(base), auth)
+        .header("openai-beta", "codex-1")
+        .header("originator", "Codex Desktop")
+        .timeout(RESET_CREDITS_TIMEOUT);
+    let json = fetch_json(
+        req,
+        "rate-limit-reset-credits",
+        FetchOptions {
+            forbidden_is_unauthorized: true,
+        },
+    )
+    .await?;
+    parse_reset_credits_payload(&json, chrono::Utc::now().timestamp_millis())
 }
 
 /// 上游 `codexWindowKind`（以分鐘判斷；30 天是 billing，其次 weekly / daily / 5 小時 session）。
@@ -253,11 +420,12 @@ fn window_from(
     if !w.is_object() {
         return None;
     }
-    let secs = js_number(
-        w.get("limitWindowSeconds")
-            .or_else(|| w.get("limit_window_seconds")),
-    );
-    let minutes = secs.map(|s| s / 60.0);
+    // 上游 `Number(w.limitWindowSeconds ?? w.limit_window_seconds)`，不是有限數字就沒有長度。
+    let secs = js_number(nullish(&[
+        w.get("limitWindowSeconds"),
+        w.get("limit_window_seconds"),
+    ]));
+    let minutes = secs.is_finite().then_some(secs / 60.0);
     let kind = window_kind(name, minutes);
     let mut win = LimitWindow::new(kind);
     win.label = match label {
@@ -361,18 +529,8 @@ pub async fn probe(http: &reqwest::Client, env: &CodexEnv) -> Result<LimitProvid
         })?;
     let auth = parse_auth(&auth_value)?;
     let config = std::fs::read_to_string(env.codex_home.join("config.toml")).ok();
-    let url = usage_url(&base_url(config.as_deref()));
-    let mut req = http
-        .get(&url)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .bearer_auth(&auth.access_token)
-        .timeout(REQUEST_TIMEOUT);
-    if !auth.account_id.is_empty() {
-        req = req.header("chatgpt-account-id", &auth.account_id);
-    }
-    if auth.is_fedramp {
-        req = req.header("x-openai-fedramp", "true");
-    }
+    let base = base_url(config.as_deref());
+    let req = oauth_get(http, &usage_url(&base), &auth).timeout(REQUEST_TIMEOUT);
     let payload = fetch_json(
         req,
         "wham/usage",
@@ -381,6 +539,14 @@ pub async fn probe(http: &reqwest::Client, env: &CodexEnv) -> Result<LimitProvid
         },
     )
     .await?;
+    // 用量成功後才問重置券（上游同樣在 usage 之後、依序）；失敗不影響這次 probe。
+    let fetched = match fetch_reset_credits(http, &base, &auth).await {
+        Ok(v) => Some(v),
+        Err(e) => {
+            tracing::debug!(status = ?e.status, error = %e.message, "Codex reset credits unavailable");
+            None
+        }
+    };
     let key = if !auth.email.is_empty() && !auth.workspace_account_id.is_empty() {
         account_key(&auth.email, &auth.workspace_account_id)
     } else {
@@ -404,6 +570,7 @@ pub async fn probe(http: &reqwest::Client, env: &CodexEnv) -> Result<LimitProvid
         account_email: auth.email.clone(),
         source: "oauth".into(),
         windows: map_usage(&payload),
+        reset_credits: resolve_reset_credits(&payload, fetched.as_ref()),
         ..LimitProvider::status_row("codex", ProviderStatus::Ok, started)
     }))
 }
@@ -589,5 +756,207 @@ mod tests {
             usage_url(DEFAULT_BASE_URL),
             "https://chatgpt.com/backend-api/wham/usage"
         );
+        assert_eq!(
+            reset_credits_url(DEFAULT_BASE_URL),
+            "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
+        );
+        assert_eq!(
+            reset_credits_url("https://codex.example.com"),
+            "https://codex.example.com/api/codex/rate-limit-reset-credits"
+        );
+    }
+
+    const JUNE_30: i64 = 1_782_777_600_000; // 2026-06-30T00:00:00Z
+
+    /// 上游 limitCollector.codex.test.js「augments reset credits expiry from the Codex OAuth endpoint」。
+    #[test]
+    fn reset_credits_parse_like_upstream() {
+        let api = parse_reset_credits_payload(
+            &json!({
+                "credits": [
+                    {"id": "expired", "status": "available", "expires_at": "2026-06-17T00:39:53Z"},
+                    {"id": "later", "status": "available", "expires_at": "2026-07-18T00:39:53.731630Z"},
+                    {"id": "earlier", "status": "Available", "expires_at": "2026-07-12T04:03:43.263391Z"},
+                    {"id": "future-status", "status": "future_status", "expires_at": "2026-07-10T04:03:43Z"},
+                    {"id": "no-date", "status": "available"}
+                ],
+                "available_count": 2
+            }),
+            JUNE_30,
+        )
+        .unwrap();
+        let usage = json!({"rate_limit": {}, "rateLimitResetCredits": {"availableCount": 7}});
+        let got = resolve_reset_credits(&usage, Some(&api)).unwrap();
+        assert_eq!(got.available_count, Some(2.0), "the API count wins");
+        assert_eq!(
+            got.next_expires_at.as_deref(),
+            Some("2026-07-12T04:03:43.263Z")
+        );
+        assert_eq!(
+            got.expirations,
+            vec!["2026-07-12T04:03:43.263Z", "2026-07-18T00:39:53.731Z"]
+        );
+        assert!(got.grants.is_empty(), "Codex credits are anonymous");
+    }
+
+    #[test]
+    fn a_bad_reset_credits_answer_is_an_error() {
+        for bad in [
+            json!({}),
+            json!({"available_count": -1}),
+            json!({"available_count": "many"}),
+            json!(null),
+        ] {
+            let err = parse_reset_credits_payload(&bad, JUNE_30).unwrap_err();
+            assert_eq!(err.status, ProviderStatus::Unavailable, "{bad}");
+        }
+        let zero = parse_reset_credits_payload(&json!({"availableCount": "0"}), JUNE_30).unwrap();
+        assert_eq!(zero, json!({"availableCount": 0.0, "nextExpiresAt": null}));
+    }
+
+    #[test]
+    fn usage_credits_fill_what_the_api_lacks() {
+        let api = parse_reset_credits_payload(&json!({"available_count": 1.7}), JUNE_30).unwrap();
+        let usage = json!({"rate_limit_reset_credits": {
+            "available_count": 9,
+            "next_expires_at": "2026-07-02T00:00:00Z",
+            "expires_at_list": ["2026-07-03T00:00:00Z", "2026-07-02T00:00:00Z"]
+        }});
+        let got = resolve_reset_credits(&usage, Some(&api)).unwrap();
+        assert_eq!(got.available_count, Some(1.0));
+        assert_eq!(
+            got.next_expires_at.as_deref(),
+            Some("2026-07-02T00:00:00.000Z")
+        );
+        assert_eq!(
+            got.expirations,
+            vec!["2026-07-02T00:00:00.000Z", "2026-07-03T00:00:00.000Z"]
+        );
+        // API 失敗：只剩 usage 回應本身帶的。
+        let fallback = resolve_reset_credits(&usage, None).unwrap();
+        assert_eq!(fallback.available_count, Some(9.0));
+        assert_eq!(
+            resolve_reset_credits(&json!({"rate_limit": {}}), None),
+            None
+        );
+        assert_eq!(
+            resolve_reset_credits(&json!({"rate_limit_reset_credits": {}}), None),
+            None,
+            "an empty object normalizes to null"
+        );
+    }
+
+    /// 最小的 HTTP 伺服器：usage 固定成功，reset-credits 回 `reset`；記下每個請求（小寫）。
+    async fn serve(
+        listener: tokio::net::TcpListener,
+        reset: (u16, &'static str),
+        log: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    ) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        const USAGE: &str = r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":4,"reset_at":1770000000,"limit_window_seconds":18000}},"rate_limit_reset_credits":{"available_count":5}}"#;
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = sock.read(&mut chunk).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+            }
+            let req = String::from_utf8_lossy(&buf).to_lowercase();
+            let (code, body) = if req.starts_with("get /backend-api/wham/usage ") {
+                (200, USAGE)
+            } else if req.starts_with("get /backend-api/wham/rate-limit-reset-credits ") {
+                reset
+            } else {
+                (404, "{}")
+            };
+            log.lock().unwrap().push(req);
+            let head = format!(
+                "HTTP/1.1 {code} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            );
+            sock.write_all(head.as_bytes()).await.unwrap();
+            sock.write_all(body.as_bytes()).await.unwrap();
+            let _ = sock.shutdown().await;
+        }
+    }
+
+    async fn probe_against(reset: (u16, &'static str)) -> (LimitProvider, Vec<String>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let server = tokio::spawn(serve(listener, reset, log.clone()));
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(
+            home.path().join("auth.json"),
+            r#"{"tokens":{"access_token":"tok","account_id":"Acct-Live"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            home.path().join("config.toml"),
+            format!("chatgpt_base_url = \"http://{addr}/backend-api\"\n"),
+        )
+        .unwrap();
+        let http = reqwest::Client::builder().no_proxy().build().unwrap();
+        let env = CodexEnv {
+            codex_home: home.path().to_path_buf(),
+        };
+        let provider = probe(&http, &env).await.unwrap();
+        server.abort();
+        let requests = log.lock().unwrap().clone();
+        (provider, requests)
+    }
+
+    #[tokio::test]
+    async fn probe_asks_for_reset_credits_after_usage() {
+        let (p, requests) = probe_against((
+            200,
+            r#"{"available_count":2,"credits":[{"status":"available","expires_at":"2099-01-02T00:00:00Z"},{"status":"available","expires_at":"2099-01-01T00:00:00Z"}]}"#,
+        ))
+        .await;
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].starts_with("get /backend-api/wham/usage "));
+        let reset = &requests[1];
+        assert!(reset.starts_with("get /backend-api/wham/rate-limit-reset-credits "));
+        for header in [
+            "authorization: bearer tok",
+            "chatgpt-account-id: acct-live",
+            "accept: application/json",
+            "openai-beta: codex-1",
+            "originator: codex desktop",
+        ] {
+            assert!(reset.contains(header), "missing {header}");
+        }
+        assert!(
+            !requests[0].contains("openai-beta"),
+            "only the reset-credits call presents as Codex Desktop"
+        );
+        let rc = p.reset_credits.unwrap();
+        assert_eq!(rc.available_count, Some(2.0));
+        assert_eq!(
+            rc.expirations,
+            vec!["2099-01-01T00:00:00.000Z", "2099-01-02T00:00:00.000Z"]
+        );
+        assert_eq!(p.windows.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_reset_credits_call_keeps_the_probe() {
+        for reset in [(500, "{}"), (401, "{}"), (200, r#"{"available_count":-1}"#)] {
+            let (p, requests) = probe_against(reset).await;
+            assert_eq!(requests.len(), 2);
+            assert_eq!(p.status, ProviderStatus::Ok, "{reset:?}");
+            assert_eq!(p.windows.len(), 1);
+            assert_eq!(
+                p.reset_credits.and_then(|r| r.available_count),
+                Some(5.0),
+                "falls back to the usage payload's own reset credits"
+            );
+        }
     }
 }

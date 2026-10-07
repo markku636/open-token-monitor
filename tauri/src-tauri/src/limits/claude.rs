@@ -4,6 +4,7 @@
 //!    → Windows 認證管理員（`Claude Code-credentials`、`…:<USER>`、`…/<USER>`）→ macOS 鑰匙圈。
 //! 2. 到期前 5 分鐘主動換 token；用量 API 回 401 時換一次再試。只有檔案來源會寫回。
 //! 3. 用量：`/api/oauth/usage?cedar_ember=1`（user-agent 必須是 claude-cli，否則 API 不給完整資料）。
+//!    `cedar_ember` 是 Anthropic 對 usage-limit reset grants 的代號：回應裡的同名區塊成為 `resetCredits`。
 //! 4. 身分：`/api/oauth/profile` → `accountKey = hash_key(["claude-account", stable])`，
 //!    與上游位元相同，hub 才能把 Electron 與 Tauri 裝置上的同一個帳號合併。快取一小時。
 //!
@@ -18,9 +19,12 @@ use serde_json::{Map, Value};
 
 use super::hash::hash_key;
 use super::http::{fetch_json, FetchOptions, ProbeError};
-use super::normalize::{as_number, finish_provider, iso_from_text};
+use super::normalize::{
+    as_number, date_parse_ms, finish_provider, is_js_object, iso_from_text, js_number,
+};
 use super::plan::claude_plan_label;
-use crate::wire::{LimitProvider, LimitWindow, ProviderStatus, WindowKind};
+use crate::usage::js::truthy;
+use crate::wire::{LimitProvider, LimitWindow, ProviderStatus, ResetCredits, WindowKind};
 
 pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1";
 pub const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
@@ -530,6 +534,93 @@ pub fn map_usage(u: &Value) -> Vec<LimitWindow> {
     windows
 }
 
+/// 上游 `claudeResetCredits`：`cedar_ember` 區塊的重置券 → 正規化前的中間形狀（值維持 API 的原樣，
+/// 交給 `reset_credits::normalize`）。每張券是一張 coupon：為什麼發、還剩幾次、清掉哪些窗口、
+/// 什麼時候失效。用完或已過 `ends_at` 的券不算——算進去等於答應一次帳號已經用不了的重置。
+pub fn reset_credits_input(usage: &Value, now_ms: i64) -> Option<Value> {
+    let block = usage.get("cedar_ember").filter(|b| is_js_object(b))?;
+    // `grant.ends_at || ''`：falsy 的到期時間等於沒有到期時間。
+    let ends_at = |g: &Value| g.get("ends_at").filter(|v| truthy(v)).cloned();
+    let grants: Vec<&Value> = block
+        .get("grants")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().collect())
+        .unwrap_or_default();
+    let grants: Vec<&Value> = grants
+        .into_iter()
+        .filter(|g| truthy(g) && js_number(g.get("resets_left")) > 0.0)
+        .filter(|g| {
+            ends_at(g)
+                .and_then(|v| date_parse_ms(&v))
+                .is_none_or(|ms| ms > now_ms)
+        })
+        .collect();
+    if grants.is_empty() {
+        return None;
+    }
+    let mut expirations: Vec<(Value, i64)> = grants
+        .iter()
+        .filter_map(|g| ends_at(g).and_then(|v| date_parse_ms(&v).map(|ms| (v, ms))))
+        .collect();
+    expirations.sort_by_key(|(_, ms)| *ms);
+    let available: f64 = grants
+        .iter()
+        .map(|g| js_number(g.get("resets_left")).floor())
+        .sum();
+    let detail: Vec<Value> = grants
+        .iter()
+        .map(|g| {
+            let mut m = Map::new();
+            for (to, from) in [
+                ("id", "id"),
+                ("label", "label"),
+                ("resetsLeft", "resets_left"),
+                ("resetsTotal", "resets_total"),
+                ("startsAt", "starts_at"),
+                ("endsAt", "ends_at"),
+                ("clears", "clears"),
+                ("usableNow", "usable_now"),
+                ("useRequiresLimit", "use_requires_limit"),
+                ("paused", "paused"),
+            ] {
+                // 上游的物件字面值會留下值為 undefined 的鍵；省略這個鍵對正規化來說是一樣的。
+                if let Some(v) = g.get(from) {
+                    m.insert(to.into(), v.clone());
+                }
+            }
+            Value::Object(m)
+        })
+        .collect();
+    let mut out = Map::new();
+    // 次數加總成 Infinity 時上游正規化成 null；JSON 放不下 Infinity，這裡直接給 null。
+    out.insert(
+        "availableCount".into(),
+        serde_json::Number::from_f64(available)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+    );
+    out.insert(
+        "nextExpiresAt".into(),
+        expirations
+            .first()
+            .map(|(v, _)| v.clone())
+            .unwrap_or(Value::Null),
+    );
+    out.insert(
+        "expirations".into(),
+        Value::Array(expirations.into_iter().map(|(v, _)| v).collect()),
+    );
+    out.insert("grants".into(), Value::Array(detail));
+    Some(Value::Object(out))
+}
+
+/// 上游 `mapClaudeUsageToProvider` 的 `resetCredits`（`now_ms` 決定哪些券已經過期）。
+pub fn reset_credits(usage: &Value, now_ms: i64) -> Option<ResetCredits> {
+    reset_credits_input(usage, now_ms)
+        .as_ref()
+        .and_then(super::reset_credits::normalize)
+}
+
 struct CachedIdentity {
     identity: Identity,
     resolved_at: Instant,
@@ -785,6 +876,7 @@ impl ClaudeProvider {
             account_email: identity.account_email,
             source: "oauth".into(),
             windows: map_usage(&usage),
+            reset_credits: reset_credits(&usage, chrono::Utc::now().timestamp_millis()),
             ..LimitProvider::status_row("claude", ProviderStatus::Ok, started)
         }))
     }
@@ -1054,5 +1146,86 @@ mod tests {
                 "subscriptionType"
             ]
         );
+    }
+
+    const JULY_2026: i64 = 1_784_937_600_000; // 2026-07-25T00:00:00Z
+
+    /// 上游 limitCollector.claude.test.js「maps cedar_ember reset grants into resetCredits」。
+    #[test]
+    fn reset_grants_map_like_upstream() {
+        let usage = json!({"five_hour": {"utilization": 12}, "cedar_ember": {"grants": [
+            {"id": "later-promo", "label": "Later promo reset", "resets_left": 2, "resets_total": 2,
+             "starts_at": "2030-01-01T00:00:00Z", "ends_at": "2030-02-01T00:00:00Z", "clears": ["seven_day"],
+             "usable_now": true, "use_requires_limit": false, "paused": false},
+            {"id": "launch-promo", "label": "Launch promo reset", "resets_left": 1, "resets_total": 1,
+             "starts_at": "2030-01-01T00:00:00Z", "ends_at": "2030-01-15T00:00:00Z",
+             "clears": ["five_hour", "seven_day", "seven_day_overage_included"],
+             "usable_now": true, "use_requires_limit": false, "paused": false}
+        ]}});
+        let rc = reset_credits(&usage, JULY_2026).unwrap();
+        assert_eq!(rc.available_count, Some(3.0));
+        assert_eq!(
+            rc.next_expires_at.as_deref(),
+            Some("2030-01-15T00:00:00.000Z")
+        );
+        assert_eq!(
+            rc.expirations,
+            vec!["2030-01-15T00:00:00.000Z", "2030-02-01T00:00:00.000Z"]
+        );
+        assert_eq!(rc.grants.len(), 2, "grants keep the API order");
+        let launch = &rc.grants[1];
+        assert_eq!(launch.id.as_deref(), Some("launch-promo"));
+        assert_eq!(launch.label.as_deref(), Some("Launch promo reset"));
+        assert_eq!(
+            (launch.resets_left, launch.resets_total),
+            (Some(1.0), Some(1.0))
+        );
+        assert_eq!(
+            launch.starts_at.as_deref(),
+            Some("2030-01-01T00:00:00.000Z")
+        );
+        assert_eq!(launch.ends_at.as_deref(), Some("2030-01-15T00:00:00.000Z"));
+        assert_eq!(
+            launch.clears,
+            vec!["five_hour", "seven_day", "seven_day_overage_included"]
+        );
+        assert_eq!(
+            (launch.usable_now, launch.use_requires_limit, launch.paused),
+            (Some(true), Some(false), Some(false))
+        );
+    }
+
+    #[test]
+    fn spent_lapsed_and_missing_grants_carry_nothing() {
+        let usage = json!({"cedar_ember": {"grants": [
+            {"id": "spent", "resets_left": 0, "resets_total": 1, "ends_at": "2030-01-15T00:00:00Z"},
+            {"id": "lapsed", "resets_left": 1, "ends_at": "2020-01-15T00:00:00Z"},
+            {"id": "not a number", "resets_left": "1%"},
+            null
+        ]}});
+        assert_eq!(reset_credits(&usage, JULY_2026), None);
+        for block in [json!(null), json!({}), json!({"grants": []}), json!("x")] {
+            assert_eq!(
+                reset_credits(&json!({"cedar_ember": block}), JULY_2026),
+                None,
+                "{block}"
+            );
+        }
+        assert_eq!(reset_credits(&json!({}), JULY_2026), None);
+    }
+
+    #[test]
+    fn grants_without_an_expiry_never_lapse() {
+        let usage = json!({"cedar_ember": {"grants": [
+            {"label": "Forever", "resets_left": "2", "ends_at": ""},
+            {"label": "Paused", "resets_left": 1.9, "ends_at": null, "paused": true}
+        ]}});
+        let rc = reset_credits(&usage, JULY_2026).unwrap();
+        assert_eq!(rc.available_count, Some(3.0), "2 + floor(1.9)");
+        assert_eq!(rc.next_expires_at, None);
+        assert!(rc.expirations.is_empty());
+        assert_eq!(rc.grants[0].resets_left, Some(2.0));
+        assert_eq!(rc.grants[0].ends_at, None);
+        assert_eq!(rc.grants[1].paused, Some(true));
     }
 }

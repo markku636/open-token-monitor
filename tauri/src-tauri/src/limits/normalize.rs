@@ -6,9 +6,11 @@
 use serde_json::Value;
 use unicode_normalization::UnicodeNormalization;
 
+use crate::usage::js::to_js_string;
 use crate::wire::{LimitProvider, LimitWindow};
 
-/// 上游 `asNumber`：有限數字，或去掉 `%`、`,`、`$` 後能轉成數字的字串。
+/// 上游 `asNumber`：有限數字，或去掉 `%`、`,`、`$` 後 `Number()` 得到有限數字的字串
+///（所以 `"0x10"` 是 16、只有 `"%"` 是 0，與 JS 相同）。
 pub fn as_number(v: &Value) -> Option<f64> {
     match v {
         Value::Number(n) => n.as_f64().filter(|f| f.is_finite()),
@@ -17,10 +19,82 @@ pub fn as_number(v: &Value) -> Option<f64> {
                 .chars()
                 .filter(|c| !matches!(c, '%' | ',' | '$'))
                 .collect();
-            cleaned.trim().parse::<f64>().ok().filter(|f| f.is_finite())
+            Some(js_string_number(&cleaned)).filter(|f| f.is_finite())
         }
         _ => None,
     }
+}
+
+/// JS 的 `Number(value)`（`None` 是 undefined）。NaN 與 ±Infinity 原樣回傳，由呼叫端判斷。
+pub fn js_number(v: Option<&Value>) -> f64 {
+    match v {
+        None | Some(Value::Object(_)) => f64::NAN,
+        Some(Value::Null) => 0.0,
+        Some(Value::Bool(b)) => f64::from(u8::from(*b)),
+        Some(Value::Number(n)) => n.as_f64().unwrap_or(f64::NAN),
+        Some(Value::String(s)) => js_string_number(s),
+        Some(v @ Value::Array(_)) => js_string_number(&to_js_string(v)),
+    }
+}
+
+/// `Number(string)`：前後空白、空字串是 0、`Infinity`、`0x` / `0o` / `0b`、十進位與指數。
+fn js_string_number(s: &str) -> f64 {
+    let t = s.trim();
+    if t.is_empty() {
+        return 0.0;
+    }
+    match t {
+        "Infinity" | "+Infinity" => return f64::INFINITY,
+        "-Infinity" => return f64::NEG_INFINITY,
+        _ => {}
+    }
+    let lower = t.to_ascii_lowercase();
+    for (prefix, radix) in [("0x", 16), ("0o", 8), ("0b", 2)] {
+        if let Some(digits) = lower.strip_prefix(prefix) {
+            if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+                return f64::NAN;
+            }
+            return u64::from_str_radix(digits, radix)
+                .map(|v| v as f64)
+                .unwrap_or(f64::NAN);
+        }
+    }
+    // Rust 的 parse 也收 `inf`、`nan`；JS 不收，所以只放行數字、正負號、小數點與指數。
+    if !t
+        .chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, '+' | '-' | '.' | 'e' | 'E'))
+    {
+        return f64::NAN;
+    }
+    t.parse::<f64>().unwrap_or(f64::NAN)
+}
+
+/// JS 的 `a ?? b ?? …`：第一個不是 null / undefined 的值；全部都是時回最後一個
+///（`None` 是 undefined，`Some(Null)` 是 null，兩者在 `!== undefined` 的判斷下不同）。
+pub fn nullish<'a>(candidates: &[Option<&'a Value>]) -> Option<&'a Value> {
+    candidates
+        .iter()
+        .copied()
+        .flatten()
+        .find(|v| !v.is_null())
+        .or_else(|| candidates.last().copied().flatten())
+}
+
+/// JS 的 `typeof value === 'object' && value !== null`（陣列也算）。
+pub fn is_js_object(v: &Value) -> bool {
+    v.is_object() || v.is_array()
+}
+
+/// JS 的 `Date.parse(value)`（先 `String(value)`），毫秒；無效是 None。字串規則沿用 `iso_from_text`。
+pub fn date_parse_ms(v: &Value) -> Option<i64> {
+    let text = match v {
+        Value::String(s) => s.clone(),
+        other => to_js_string(other),
+    };
+    let iso = iso_from_text(&text)?;
+    chrono::DateTime::parse_from_rfc3339(&iso)
+        .ok()
+        .map(|d| d.timestamp_millis())
 }
 
 pub fn clamp_percent(v: f64) -> f64 {
@@ -32,7 +106,7 @@ pub fn remaining_percent(used: f64) -> f64 {
     ((100.0 - used) * 1000.0).round() / 1000.0
 }
 
-fn iso_millis(ms: i64) -> Option<String> {
+pub fn iso_millis(ms: i64) -> Option<String> {
     chrono::DateTime::from_timestamp_millis(ms)
         .map(|d| d.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
 }
@@ -279,9 +353,47 @@ mod tests {
     }
 
     #[test]
+    fn js_helpers_follow_js() {
+        assert_eq!(js_number(Some(&json!(" 12 "))), 12.0);
+        assert_eq!(js_number(Some(&json!("0x10"))), 16.0);
+        assert_eq!(js_number(Some(&json!("1e3"))), 1000.0);
+        assert_eq!(js_number(Some(&json!(".5"))), 0.5);
+        assert_eq!(js_number(Some(&json!(""))), 0.0);
+        assert_eq!(js_number(Some(&json!(null))), 0.0);
+        assert_eq!(js_number(Some(&json!(true))), 1.0);
+        assert_eq!(js_number(Some(&json!([7]))), 7.0);
+        assert_eq!(js_number(Some(&json!("Infinity"))), f64::INFINITY);
+        for nan in [json!("inf"), json!("12%"), json!("0x+5"), json!({})] {
+            assert!(js_number(Some(&nan)).is_nan(), "{nan}");
+        }
+        assert!(js_number(None).is_nan());
+
+        let (a, n) = (json!(1), json!(null));
+        assert_eq!(nullish(&[None, Some(&a)]), Some(&a));
+        assert_eq!(nullish(&[Some(&n), Some(&a)]), Some(&a));
+        assert_eq!(nullish(&[Some(&n), None]), None, "null ?? undefined");
+        assert_eq!(nullish(&[None, Some(&n)]), Some(&n), "undefined ?? null");
+
+        assert_eq!(
+            date_parse_ms(&json!("2026-08-01T00:00:00Z")),
+            Some(1_785_542_400_000)
+        );
+        assert_eq!(date_parse_ms(&json!("1770000000")), None);
+        assert_eq!(date_parse_ms(&json!(1_770_000_000)), None);
+        assert_eq!(date_parse_ms(&json!(true)), None);
+    }
+
+    #[test]
     fn numbers_and_percentages() {
         assert_eq!(as_number(&json!("12.5%")), Some(12.5));
         assert_eq!(as_number(&json!("$1,234")), Some(1234.0));
+        assert_eq!(
+            as_number(&json!("0x10")),
+            Some(16.0),
+            "JS Number() reads hex"
+        );
+        assert_eq!(as_number(&json!("%")), Some(0.0), "JS: Number('') is 0");
+        assert_eq!(as_number(&json!("Infinity")), None);
         assert_eq!(as_number(&json!("abc")), None);
         assert_eq!(
             remaining_percent(99.9375),
