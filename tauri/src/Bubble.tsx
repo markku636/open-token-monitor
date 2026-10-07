@@ -7,6 +7,7 @@ import { create } from "zustand";
 import { api, isTauri, onBubbleState, type BubbleView } from "./api";
 import { fmtTokens } from "./format";
 import { t } from "./i18n";
+import { suppressNextHeadlineMotion } from "./motionRuntime";
 import { useApp } from "./store";
 
 export const useBubble = create<BubbleView>(() => ({ collapsed: false, side: null }));
@@ -18,7 +19,12 @@ export function useBubbleSync() {
   useEffect(() => {
     if (subscribed || !isTauri()) return;
     subscribed = true;
-    void onBubbleState((v) => useBubble.setState(v));
+    void onBubbleState((v) => {
+      // 展開時整個 widget 重建：總數直接顯示，不從舊值重數（上游 Windows 重建視窗時的
+      // suppressInitialNumberAnimation）。
+      if (useBubble.getState().collapsed && !v.collapsed) suppressNextHeadlineMotion();
+      useBubble.setState(v);
+    });
     void api.bubbleGet().then((v) => {
       if (v) useBubble.setState(v);
     });

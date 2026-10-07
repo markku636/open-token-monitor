@@ -35,6 +35,8 @@ pub const SUPPORTED_CLIENTS: &[&str] = &[
     "copilot",
 ];
 
+/// 新增 provider 時維持上游 `LIMIT_PROVIDER_CATALOG`（shared/limitProviders.js）的相對順序：
+/// `view_prefs::migrate_home_limit_provider_order` 拿它當「預設順序」比較。
 pub const SUPPORTED_LIMIT_PROVIDERS: &[&str] = &["claude", "codex", "cursor", "copilot"];
 
 /// hub 只接受這幾個上傳間隔（src/shared/syncUploadInterval.js）；其他值會被當成 0（即時）。
@@ -106,8 +108,20 @@ pub struct Settings {
     pub limits_refresh_ms: u64,
     /// `auto` | `zh-TW` | `en`
     pub language: String,
-    /// `system` | `dark` | `light`（前端套色票；system 跟著 Windows 的應用程式模式）
+    /// `system` | `dark` | `light`（色彩模式，Tauri 專有；system 跟著 Windows 的應用程式模式）。
+    /// 只在 `theme_colors` 沒有覆寫 `bg` 時決定明暗；有背景覆寫時由前端依背景亮度決定（上游規則）。
     pub theme: String,
+    /// 動態效果：`system`（跟隨 Windows「動畫效果」）| `on`（一律減少）| `off`（一律播放）。
+    /// 上游 `reduceMotion`（src/electron/motionPreference.js）；只影響畫面，不上傳。
+    pub reduce_motion: String,
+    /// 介面配色覆寫（上游 `themeColors`，themePresets.js）：`accent` / `bg` / `text` / `muted` → 小寫
+    /// `#rrggbb`。空 = 內建配色。寬鬆解析：型別錯了只當成空的，不讓整個 settings.json 被當成壞檔。
+    #[serde(deserialize_with = "de_color_map")]
+    pub theme_colors: IndexMap<String, String>,
+    /// 廠商色覆寫（上游 `vendorColors`）：廠商 id → 小寫 `#rrggbb`。未知的 id 照上游保留，
+    /// 前端只採用品牌表裡有的 id（上游 renderer 同樣）。
+    #[serde(deserialize_with = "de_color_map")]
+    pub vendor_colors: IndexMap<String, String>,
     pub automatic_app_updates: bool,
     /// 使用者按了「忽略此版本」的版本：不再提示、也不自動下載，直到有更新的版本或手動檢查（上游 `appUpdate.dismissedVersion`）。
     pub app_update_dismissed_version: String,
@@ -115,6 +129,16 @@ pub struct Settings {
     pub show_live_token_rate: bool,
     /// 速率顯示 tok/s（`speed`）或 tok/min（`burn`）；點速率可切換（上游 `tokenRateMode`）。
     pub token_rate_mode: String,
+    /// 清單前面畫工具／廠商圖示；關閉時改回色點（上游 `showToolIcons`，main.js defaultSettings 預設開）。
+    pub show_tool_icons: bool,
+    /// 標題旁的狀態點（上游 `showLiveDot`，預設開）。header 還沒照這三個鍵呈現，先照上游預設存下，
+    /// settings.json 與 Electron 版互通。
+    pub show_live_dot: bool,
+    /// 標題只顯示 Σ（上游 `titleIconOnly`，defaultSettings 是 true；patch 的 fallback false 只在值為空時才用到）。
+    pub title_icon_only: bool,
+    /// 交換重新掃描與設定按鈕的位置（上游 `settingsInTitlebar`，renderer defaultAppearance 預設關；
+    /// 鍵名是上游舊版「設定鈕放標題列」遺留的）。
+    pub settings_in_titlebar: bool,
     /// 成本的顯示幣別（`USD` / `TWD` / `HKD` / `CNY`，上游 `currency`）。
     pub currency: String,
     /// 手動匯率（1 USD = ?），有值的幣別不用抓到的匯率（上游 `currencyRates`）。
@@ -124,7 +148,7 @@ pub struct Settings {
     pub export_dir: String,
     /// 自動匯出的間隔；資料沒變時不重寫（上游 `exportIntervalMs`）。
     pub export_interval_ms: u64,
-    /// 服務狀態（額度分頁底部）顯示時多久檢查一次；0 = 只在按重新整理時（上游 `serviceStatusRefreshMs`）。
+    /// 服務狀態（「狀態」視圖）顯示時多久檢查一次；0 = 只在按重新整理時（上游 `serviceStatusRefreshMs`）。
     pub service_status_refresh_ms: u64,
     /// 模型別名：記錄中的模型 id → 顯示時合併成的 id（上游 `modelAliases`；只影響畫面，不改上傳與匯出）。
     pub model_aliases: IndexMap<String, String>,
@@ -153,6 +177,38 @@ pub struct Settings {
     /// 全域顯示／隱藏快捷鍵，例如 `CommandOrControl+Shift+T`；空字串 = 關閉（上游 `windowToggleShortcut`）。
     pub window_toggle_shortcut: String,
     pub autostart: bool,
+    /// widget 視圖的切換順序（上游 `viewDisplayOrder`）：空字串 = 預設順序，否則是
+    /// `view_prefs::VIEW_IDS` 的完整排列。
+    #[serde(deserialize_with = "crate::view_prefs::de_csv")]
+    pub view_display_order: String,
+    /// 隱藏的視圖（上游 `hiddenViews`，預設 `status`）；全部隱藏時收斂成空字串。
+    #[serde(deserialize_with = "crate::view_prefs::de_csv")]
+    pub hidden_views: String,
+    /// 主頁模組的順序（上游 `homeModuleOrder`），永遠是完整的排列。
+    #[serde(deserialize_with = "crate::view_prefs::de_csv")]
+    pub home_module_order: String,
+    /// 主頁隱藏的模組（上游 `hiddenHomeModules`，預設 `tool,device`）。
+    #[serde(deserialize_with = "crate::view_prefs::de_csv")]
+    pub hidden_home_modules: String,
+    /// 主頁額度剩餘不多時上色（上游 `showHomeLimitBars`，預設關）。
+    pub show_home_limit_bars: bool,
+    /// 同一 provider 有多個帳號時在帳號名前加 provider 名稱（上游 `showHomeLimitProviderNames`）。
+    pub show_home_limit_provider_names: bool,
+    /// 主頁額度的 provider 順序（上游 `homeLimitProviderOrder`）：空字串 = 剩餘最少優先。
+    #[serde(deserialize_with = "crate::view_prefs::de_csv")]
+    pub home_limit_provider_order: String,
+    /// 主頁額度不顯示的 provider（上游 `hiddenHomeLimitProviders`）。
+    #[serde(deserialize_with = "crate::view_prefs::de_csv")]
+    pub hidden_home_limit_providers: String,
+    /// 主頁額度最多顯示幾個帳號，1–12（上游 `homeLimitAccountCount`，預設 3）。
+    #[serde(deserialize_with = "crate::view_prefs::de_account_count")]
+    pub home_limit_account_count: u32,
+    /// 主頁活動的活躍天數：`all`（history summary）| `year`（近 12 個月；上游 `homeActiveDaysWindow`）。
+    #[serde(deserialize_with = "crate::view_prefs::de_csv")]
+    pub home_active_days_window: String,
+    /// 熱力圖依 `tokens` 或 `cost` 上色（上游 `heatmapMetric`，預設 `cost`）。
+    #[serde(deserialize_with = "crate::view_prefs::de_csv")]
+    pub heatmap_metric: String,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -184,10 +240,17 @@ impl Default for Settings {
             limits_refresh_ms: 300_000,
             language: "auto".into(),
             theme: "system".into(),
+            reduce_motion: "system".into(),
+            theme_colors: IndexMap::new(),
+            vendor_colors: IndexMap::new(),
             automatic_app_updates: true,
             app_update_dismissed_version: String::new(),
             show_live_token_rate: false,
             token_rate_mode: "speed".into(),
+            show_tool_icons: true,
+            show_live_dot: true,
+            title_icon_only: true,
+            settings_in_titlebar: false,
             currency: "USD".into(),
             currency_rates: IndexMap::new(),
             export_auto_enabled: false,
@@ -208,6 +271,18 @@ impl Default for Settings {
             zoom_factor: 1.0,
             window_toggle_shortcut: String::new(),
             autostart: true,
+            // 以下是上游 main.js `defaultSettings()` 的預設值（:519-584）。
+            view_display_order: String::new(),
+            hidden_views: crate::view_prefs::DEFAULT_HIDDEN_VIEWS.into(),
+            home_module_order: crate::view_prefs::DEFAULT_HOME_MODULE_ORDER.into(),
+            hidden_home_modules: crate::view_prefs::DEFAULT_HIDDEN_HOME_MODULES.into(),
+            show_home_limit_bars: false,
+            show_home_limit_provider_names: false,
+            home_limit_provider_order: String::new(),
+            hidden_home_limit_providers: String::new(),
+            home_limit_account_count: crate::view_prefs::HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
+            home_active_days_window: "all".into(),
+            heatmap_metric: "cost".into(),
             extra: Map::new(),
         }
     }
@@ -389,11 +464,34 @@ impl Settings {
             self.theme = "system".into();
             changed.push("theme");
         }
+        // 上游 motionPreference.js `normalize`：去掉前後空白、大小寫要相符，其他值一律回到 system
+        //（不是保留目前的值）。
+        let reduce_motion = self.reduce_motion.trim();
+        let reduce_motion = if matches!(reduce_motion, "system" | "on" | "off") {
+            reduce_motion
+        } else {
+            "system"
+        };
+        if reduce_motion != self.reduce_motion {
+            self.reduce_motion = reduce_motion.to_string();
+            changed.push("reduceMotion");
+        }
+        let theme_colors = normalize_theme_colors(&self.theme_colors);
+        if theme_colors != self.theme_colors {
+            self.theme_colors = theme_colors;
+            changed.push("themeColors");
+        }
+        let vendor_colors = normalize_vendor_colors(&self.vendor_colors);
+        if vendor_colors != self.vendor_colors {
+            self.vendor_colors = vendor_colors;
+            changed.push("vendorColors");
+        }
         let paths = normalize_custom_scan_paths(&self.custom_scan_paths);
         if paths != self.custom_scan_paths {
             self.custom_scan_paths = paths;
             changed.push("customScanPaths");
         }
+        changed.extend(crate::view_prefs::normalize(self));
         changed
     }
 
@@ -439,12 +537,15 @@ impl Settings {
     /// 以 JSON patch（前端送來的部分欄位）更新，驗證後回傳新設定。未知或型別錯誤的欄位回錯。
     pub fn patched(&self, patch: &Map<String, Value>) -> AppResult<Settings> {
         const READ_ONLY: &[&str] = &["version", "deviceId"];
+        // 視圖設定裡上游「無效就保留目前的值」的欄位先濾掉（view_prefs::sanitize_patch）。
+        let mut patch = patch.clone();
+        crate::view_prefs::sanitize_patch(&mut patch);
         let mut merged =
             serde_json::to_value(self).map_err(|e| AppError::Internal(e.to_string()))?;
         let obj = merged
             .as_object_mut()
             .expect("settings serialize to an object");
-        for (key, value) in patch {
+        for (key, value) in &patch {
             if READ_ONLY.contains(&key.as_str()) {
                 return Err(AppError::Settings(format!("{key} 不可修改")));
             }
@@ -623,6 +724,63 @@ fn normalize_custom_scan_paths(
     }
     out.retain(|_, dirs| !dirs.is_empty());
     out
+}
+
+/// 可自訂的介面色（上游 themePresets.js `INTERFACE_COLOR_KEYS`；順序是 TM1 主題代碼格式的一部分）。
+pub const THEME_COLOR_KEYS: &[&str] = &["accent", "bg", "text", "muted"];
+
+/// 上游 themePresets.js `normalizeHex`：去頭尾空白後必須剛好是 `#` 加 6 個十六進位字元，回傳小寫；
+/// `#abc` 簡寫與少了 `#` 都不接受。
+pub fn normalize_hex(value: &str) -> Option<String> {
+    let v = value.trim();
+    let digits = v.strip_prefix('#')?;
+    (digits.len() == 6 && digits.bytes().all(|b| b.is_ascii_hexdigit())).then(|| v.to_lowercase())
+}
+
+/// 上游 `normalizeOverrides(themeColors, INTERFACE_COLOR_KEYS)`：只留四個鍵與合法的色碼。
+/// 與預設值相同的值不拿掉（貼上的主題代碼存的是完整的四色，上游同樣保留）。
+fn normalize_theme_colors(value: &IndexMap<String, String>) -> IndexMap<String, String> {
+    value
+        .iter()
+        .filter(|(k, _)| THEME_COLOR_KEYS.contains(&k.as_str()))
+        .filter_map(|(k, v)| normalize_hex(v).map(|hex| (k.clone(), hex)))
+        .collect()
+}
+
+/// 上游 main.js `migrateVendorColors`（載入與每次 patch 都跑）：`kilocode` → `kilo`、`micode` → `mimo`
+///（新 id 已有值時不覆蓋，舊 id 一律刪掉；`xiaomi` 是模型廠商那一軸，保留自己的覆寫）。
+/// 上游在 main 不驗證色碼、交給 renderer 忽略壞值；這裡照 validate() 的慣例直接清掉壞值與空鍵，
+/// 畫面上的結果相同。未知的廠商 id 照上游保留（新版加的廠商降版後不會被刪）。
+fn normalize_vendor_colors(value: &IndexMap<String, String>) -> IndexMap<String, String> {
+    let mut colors = value.clone();
+    for (new_id, old_id) in [("kilo", "kilocode"), ("mimo", "micode")] {
+        if let Some(old) = colors.shift_remove(old_id) {
+            colors.entry(new_id.to_string()).or_insert(old);
+        }
+    }
+    colors
+        .iter()
+        .filter(|(k, _)| !k.trim().is_empty())
+        .filter_map(|(k, v)| normalize_hex(v).map(|hex| (k.clone(), hex)))
+        .collect()
+}
+
+/// `themeColors` / `vendorColors` 的寬鬆解析：物件只留字串值（依原順序），其他型別當成空的。
+/// 手改壞一個值不該讓 `load_in` 把整份 settings.json 改名成 `.corrupt-*`。
+fn de_color_map<'de, D>(deserializer: D) -> Result<IndexMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(match Value::deserialize(deserializer)? {
+        Value::Object(map) => map
+            .into_iter()
+            .filter_map(|(k, v)| match v {
+                Value::String(s) => Some((k, s)),
+                _ => None,
+            })
+            .collect(),
+        _ => IndexMap::new(),
+    })
 }
 
 /// hub 設定的來源，給診斷畫面與 `tm-agent doctor` 顯示。
@@ -855,6 +1013,38 @@ mod tests {
     }
 
     #[test]
+    fn widget_chrome_keys_use_upstream_names_and_defaults() {
+        // 上游 main.js defaultSettings：showLiveDot / showToolIcons / titleIconOnly 預設 true；
+        // settingsInTitlebar 只在 renderer defaultAppearance，預設 false。舊檔沒有這些鍵時補預設值。
+        let s: Settings = serde_json::from_str(r#"{"deviceId":"abc"}"#).unwrap();
+        assert!(s.show_tool_icons && s.show_live_dot && s.title_icon_only);
+        assert!(!s.settings_in_titlebar);
+        let raw = serde_json::to_value(&s).unwrap();
+        assert_eq!(raw["showToolIcons"], json!(true));
+        assert_eq!(raw["showLiveDot"], json!(true));
+        assert_eq!(raw["titleIconOnly"], json!(true));
+        assert_eq!(raw["settingsInTitlebar"], json!(false));
+        assert!(s.extra.is_empty());
+
+        // Electron 版寫的值原樣讀進來、存回去，不會落進 extra。
+        let s: Settings = serde_json::from_str(
+            r#"{"showToolIcons":false,"showLiveDot":false,"titleIconOnly":false,"settingsInTitlebar":true}"#,
+        )
+        .unwrap();
+        assert!(!s.show_tool_icons && !s.show_live_dot && !s.title_icon_only);
+        assert!(s.settings_in_titlebar);
+        assert!(s.extra.is_empty());
+
+        let mut patch = Map::new();
+        patch.insert("showToolIcons".into(), json!(false));
+        let next = Settings::default().patched(&patch).unwrap();
+        assert!(!next.show_tool_icons);
+        // 型別錯誤的 patch 回錯（與其他 bool 設定相同），不會存成字串。
+        patch.insert("showToolIcons".into(), json!("off"));
+        assert!(Settings::default().patched(&patch).is_err());
+    }
+
+    #[test]
     fn corrupt_file_is_set_aside() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(SETTINGS_FILE), "{not json").unwrap();
@@ -884,6 +1074,237 @@ mod tests {
             s.patched(&patch).unwrap().sync_upload_interval_ms,
             1_200_000
         );
+    }
+
+    fn color_map(v: Value) -> IndexMap<String, String> {
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn theme_colors_are_normalized_like_upstream() {
+        assert_eq!(normalize_hex(" #AbCdEf "), Some("#abcdef".into()));
+        for bad in ["#abc", "abcdef", "#abcdeg", "#abcdef0", "", "#"] {
+            assert_eq!(normalize_hex(bad), None, "{bad:?}");
+        }
+        let mut s = Settings {
+            theme_colors: color_map(json!({
+                "accent": "#AABBCC", "bg": " #303438 ", "text": "bad", "bogus": "#ffffff"
+            })),
+            ..Settings::default()
+        };
+        assert!(s.validate().contains(&"themeColors"));
+        assert_eq!(
+            s.theme_colors,
+            color_map(json!({ "accent": "#aabbcc", "bg": "#303438" }))
+        );
+        // 與預設值相同的完整四色（貼上的 TM1 代碼）原樣保留，不被當成「沒覆寫」拿掉。
+        let full = color_map(json!({
+            "accent": "#b7ead4", "bg": "#303438", "text": "#eef5fb", "muted": "#a3adbb"
+        }));
+        s.theme_colors = full.clone();
+        assert!(!s.validate().contains(&"themeColors"));
+        assert_eq!(s.theme_colors, full);
+    }
+
+    #[test]
+    fn vendor_colors_migrate_renamed_ids() {
+        let normalized = |v: Value| normalize_vendor_colors(&color_map(v));
+        assert_eq!(
+            normalized(json!({ "kilocode": "#F8F676" })),
+            color_map(json!({ "kilo": "#f8f676" }))
+        );
+        assert_eq!(
+            normalized(json!({ "kilo": "#111111", "kilocode": "#222222" })),
+            color_map(json!({ "kilo": "#111111" }))
+        );
+        assert_eq!(
+            normalized(json!({ "micode": "#000000" })),
+            color_map(json!({ "mimo": "#000000" }))
+        );
+        // xiaomi 是模型廠商那一軸，與 MiMo 工具各自保留。
+        assert_eq!(
+            normalized(json!({ "xiaomi": "#123456", "micode": "#abcdef" })),
+            color_map(json!({ "xiaomi": "#123456", "mimo": "#abcdef" }))
+        );
+        assert_eq!(
+            normalized(
+                json!({ "futurevendor": "#010203", "claude": "red", "": "#000000", "  ": "#000000" })
+            ),
+            color_map(json!({ "futurevendor": "#010203" }))
+        );
+        let mut s = Settings {
+            vendor_colors: color_map(json!({ "kilocode": "#F8F676" })),
+            ..Settings::default()
+        };
+        assert!(s.validate().contains(&"vendorColors"));
+    }
+
+    #[test]
+    fn malformed_color_maps_do_not_corrupt_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(SETTINGS_FILE),
+            r##"{"deviceId":"x","themeColors":"oops","vendorColors":{"claude":5,"codex":"#49A3B0"}}"##,
+        )
+        .unwrap();
+        let (s, created) = Settings::load_in(dir.path()).unwrap();
+        assert!(!created);
+        assert!(s.theme_colors.is_empty());
+        assert_eq!(s.vendor_colors, color_map(json!({ "codex": "#49a3b0" })));
+        let corrupt = std::fs::read_dir(dir.path()).unwrap().any(|e| {
+            e.unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".corrupt-")
+        });
+        assert!(!corrupt);
+    }
+
+    #[test]
+    fn color_patch_replaces_the_whole_map() {
+        let s = Settings {
+            theme_colors: color_map(json!({ "accent": "#111111", "bg": "#222222" })),
+            ..Settings::default()
+        };
+        let mut patch = Map::new();
+        patch.insert("themeColors".into(), json!({ "muted": "#333333" }));
+        assert_eq!(
+            s.patched(&patch).unwrap().theme_colors,
+            color_map(json!({ "muted": "#333333" }))
+        );
+    }
+
+    #[test]
+    fn color_maps_default_to_empty_objects() {
+        let raw = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(raw["themeColors"], json!({}));
+        assert_eq!(raw["vendorColors"], json!({}));
+    }
+
+    #[test]
+    fn view_prefs_default_like_upstream() {
+        let mut s = Settings::default();
+        assert_eq!(s.view_display_order, "");
+        assert_eq!(s.hidden_views, "status");
+        assert_eq!(s.home_module_order, "limits,tool,device,model,trends");
+        assert_eq!(s.hidden_home_modules, "tool,device");
+        assert!(!s.show_home_limit_bars);
+        assert!(!s.show_home_limit_provider_names);
+        assert_eq!(s.home_limit_provider_order, "");
+        assert_eq!(s.hidden_home_limit_providers, "");
+        assert_eq!(s.home_limit_account_count, 3);
+        assert_eq!(s.home_active_days_window, "all");
+        assert_eq!(s.heatmap_metric, "cost");
+        assert!(s.validate().is_empty(), "defaults are already normalized");
+    }
+
+    fn load_json(raw: &str) -> Settings {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(SETTINGS_FILE), raw).unwrap();
+        let (s, created) = Settings::load_in(dir.path()).unwrap();
+        assert!(!created, "{raw} must not be treated as corrupt");
+        s
+    }
+
+    #[test]
+    fn view_prefs_load_leniently_like_upstream() {
+        for (raw, want) in [
+            ("0", 1),
+            ("13", 12),
+            ("2.9", 2),
+            (r#""5""#, 5),
+            (r#""x""#, 3),
+            ("null", 1),
+        ] {
+            let s = load_json(&format!(r#"{{"homeLimitAccountCount":{raw}}}"#));
+            assert_eq!(s.home_limit_account_count, want, "{raw}");
+        }
+        assert_eq!(load_json("{}").home_limit_account_count, 3);
+        let s = load_json(
+            r#"{"homeActiveDaysWindow":"YEAR","heatmapMetric":"Tokens","hiddenViews":5,"homeModuleOrder":{}}"#,
+        );
+        assert_eq!(s.home_active_days_window, "all", "case-sensitive");
+        assert_eq!(s.heatmap_metric, "cost");
+        assert_eq!(s.hidden_views, "");
+        assert_eq!(s.home_module_order, "limits,tool,device,model,trends");
+        let s =
+            load_json(r#"{"homeActiveDaysWindow":" year ","viewDisplayOrder":["trends","home"]}"#);
+        assert_eq!(s.home_active_days_window, "year");
+        assert_eq!(
+            s.view_display_order,
+            "trends,home,tool,status,device,limits"
+        );
+    }
+
+    #[test]
+    fn view_prefs_patch_keeps_current_values_for_invalid_enums() {
+        let s = Settings {
+            heatmap_metric: "tokens".into(),
+            home_active_days_window: "year".into(),
+            ..Settings::default()
+        };
+        let mut patch = Map::new();
+        patch.insert("heatmapMetric".into(), json!("bogus"));
+        patch.insert("homeActiveDaysWindow".into(), json!("x"));
+        patch.insert("hiddenViews".into(), json!(["status", "trends"]));
+        let next = s.patched(&patch).unwrap();
+        assert_eq!(next.heatmap_metric, "tokens");
+        assert_eq!(next.home_active_days_window, "year");
+        assert_eq!(next.hidden_views, "status,trends");
+        let mut patch = Map::new();
+        patch.insert("heatmapMetric".into(), json!(" cost "));
+        patch.insert("homeLimitAccountCount".into(), json!(40));
+        let next = s.patched(&patch).unwrap();
+        assert_eq!(next.heatmap_metric, "cost");
+        assert_eq!(next.home_limit_account_count, 12);
+    }
+
+    #[test]
+    fn reduce_motion_defaults_to_system_and_normalizes() {
+        assert_eq!(Settings::default().reduce_motion, "system");
+        for (input, want) in [
+            ("system", "system"),
+            ("on", "on"),
+            ("off", "off"),
+            (" on ", "on"),
+            ("ON", "system"),
+            ("sideways", "system"),
+            ("", "system"),
+        ] {
+            let mut s = Settings {
+                reduce_motion: input.into(),
+                ..Settings::default()
+            };
+            let changed = s.validate();
+            assert_eq!(s.reduce_motion, want, "{input:?}");
+            assert_eq!(
+                changed.contains(&"reduceMotion"),
+                input != want,
+                "{input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn reduce_motion_serializes_camel_case() {
+        assert_eq!(
+            serde_json::to_value(Settings::default()).unwrap()["reduceMotion"],
+            "system"
+        );
+        assert_eq!(load_json(r#"{"reduceMotion":"off"}"#).reduce_motion, "off");
+        assert_eq!(load_json("{}").reduce_motion, "system");
+        let s = Settings::default();
+        let mut patch = Map::new();
+        patch.insert("reduceMotion".into(), json!("on"));
+        assert_eq!(s.patched(&patch).unwrap().reduce_motion, "on");
+        // 上游修改時不合法的值同樣回到 system（motionPreference.normalize 的 fallback），不保留目前的值。
+        let s = Settings {
+            reduce_motion: "off".into(),
+            ..Settings::default()
+        };
+        let mut patch = Map::new();
+        patch.insert("reduceMotion".into(), json!("bogus"));
+        assert_eq!(s.patched(&patch).unwrap().reduce_motion, "system");
     }
 
     #[test]

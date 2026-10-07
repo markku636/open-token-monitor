@@ -16,6 +16,10 @@ use url::Url;
 /// hub 上的 Tauri updater feed 路徑（對應 overlay `hub/releases.js` 的 `/updates/`）。
 pub const FEED_PATH: &str = "updates/latest.json";
 
+/// hub 上列出核准版本的頁面（`/downloads/releases`；本 repo 根目錄的 hub 目前沒有提供）。
+/// 版本說明連結開這頁，錨點是 `v<版本>`，對應頁面上每個版本的 `<section id="v…">`。
+pub const RELEASES_PAGE_PATH: &str = "downloads/releases";
+
 /// 啟動後第一次檢查的延遲範圍：大量裝置同時開機時錯開，別在同一分鐘打 hub。
 pub const FIRST_CHECK_MIN: Duration = Duration::from_secs(30);
 pub const FIRST_CHECK_MAX: Duration = Duration::from_secs(120);
@@ -70,6 +74,32 @@ pub fn feed_url(
         return Err(DisabledReason::InvalidHub);
     }
     base.join(FEED_PATH).map_err(|_| DisabledReason::InvalidHub)
+}
+
+/// 版本說明連結：`<生效的 hub>/downloads/releases#v<版本>`（上游 appUpdater.js 的 `htmlUrl` 指向 GitHub
+/// release，這裡改指到 hub 的版本頁）。hub 位置的規則與
+/// `feed_url` 相同（子路徑保留、只接受 http 與 https）；不知道版本（例如更新出錯）時不帶錨點，頁面上仍有
+/// 每個核准版本的下載連結。
+pub fn release_page_url(hub_url: Option<&str>, version: Option<&str>) -> Option<Url> {
+    let hub = hub_url.map(str::trim).filter(|s| !s.is_empty())?;
+    let base = Url::parse(&format!("{}/", hub.trim_end_matches('/'))).ok()?;
+    if !matches!(base.scheme(), "https" | "http") {
+        return None;
+    }
+    let mut url = base.join(RELEASES_PAGE_PATH).ok()?;
+    if let Some(v) = version.map(str::trim).filter(|v| is_release_version(v)) {
+        url.set_fragment(Some(&format!("v{v}")));
+    }
+    Some(url)
+}
+
+/// 與 scripts/make-latest-json.mjs 的 `SEMVER` 同一組字元（數字開頭，只有英數、點與連字號）：
+/// 擋掉會讓錨點變形或對不到 `<section id>` 的值（`v` 前綴、空白、`#`）。
+fn is_release_version(v: &str) -> bool {
+    v.len() <= 64
+        && v.as_bytes().first().is_some_and(u8::is_ascii_digit)
+        && v.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
 }
 
 /// `seed` 均勻落在 `[min, max]`。`seed` 由呼叫端給（uuid v4 的隨機位元），測試可重現。
@@ -147,6 +177,17 @@ impl UpdateState {
         }
     }
 
+    /// 狀態所指的版本（有新版、下載中、已下載、安裝中）；版本頁的錨點用它。
+    pub fn version(&self) -> Option<&str> {
+        match self {
+            UpdateState::Available { version, .. }
+            | UpdateState::Downloading { version, .. }
+            | UpdateState::Ready { version, .. }
+            | UpdateState::Installing { version } => Some(version),
+            _ => None,
+        }
+    }
+
     /// 忙碌中（檢查、下載、安裝）時不接受新的檢查。
     pub fn is_busy(&self) -> bool {
         matches!(
@@ -195,6 +236,83 @@ mod tests {
         assert_eq!(
             feed_url(true, false, "pk", Some("ftp://h")),
             Err(DisabledReason::InvalidHub)
+        );
+    }
+
+    #[test]
+    fn release_page_is_on_the_effective_hub_with_a_version_anchor() {
+        let page = |hub: Option<&str>, v: Option<&str>| release_page_url(hub, v).map(String::from);
+        assert_eq!(
+            page(Some("https://tokens.example.internal/"), Some("0.2.0")).as_deref(),
+            Some("https://tokens.example.internal/downloads/releases#v0.2.0")
+        );
+        // 子路徑的 hub。
+        assert_eq!(
+            page(Some("https://proxy.example/tm"), None).as_deref(),
+            Some("https://proxy.example/tm/downloads/releases")
+        );
+        assert_eq!(
+            page(Some(" https://h/ "), Some("0.61.0-corp.2")).as_deref(),
+            Some("https://h/downloads/releases#v0.61.0-corp.2")
+        );
+    }
+
+    #[test]
+    fn odd_versions_drop_the_anchor_and_bad_hubs_have_no_page() {
+        for v in [
+            "",
+            "  ",
+            "v0.2.0",
+            "0.2.0 <x>",
+            "0.2.0#x",
+            "0.2.0+build",
+            "../0.2.0",
+        ] {
+            assert_eq!(
+                release_page_url(Some("https://h"), Some(v)).map(String::from),
+                Some("https://h/downloads/releases".to_string()),
+                "{v:?}"
+            );
+        }
+        let long = format!("1.{}", "0".repeat(70));
+        assert_eq!(
+            release_page_url(Some("https://h"), Some(&long))
+                .and_then(|u| u.fragment().map(str::to_string)),
+            None
+        );
+        for hub in [
+            None,
+            Some(""),
+            Some("   "),
+            Some("ftp://h"),
+            Some("not a url"),
+        ] {
+            assert_eq!(release_page_url(hub, Some("0.2.0")), None, "{hub:?}");
+        }
+    }
+
+    #[test]
+    fn state_version_is_known_while_an_update_is_in_hand() {
+        let ready = UpdateState::Ready {
+            version: "0.2.0".into(),
+            notes: None,
+            date: None,
+        };
+        assert_eq!(ready.version(), Some("0.2.0"));
+        let downloading = UpdateState::Downloading {
+            version: "0.3.0".into(),
+            received: 0,
+            total: None,
+        };
+        assert_eq!(downloading.version(), Some("0.3.0"));
+        assert_eq!(UpdateState::Idle.version(), None);
+        assert_eq!(
+            UpdateState::Error {
+                message: "x".into(),
+                retry_at: None
+            }
+            .version(),
+            None
         );
     }
 

@@ -61,6 +61,9 @@ pub struct SlimPeriods {
 #[serde(rename_all = "camelCase", default)]
 pub struct WindowEnd {
     pub ends_at: Option<String>,
+    /// 裝置本地的日（YYYY-MM-DD）或月鍵：全公司的範圍以每台裝置自己的日期推算（上游
+    /// fixedPeriodRanges.js `deviceDayState`）。
+    pub key: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -68,6 +71,8 @@ pub struct WindowEnd {
 pub struct SlimPeriodWindows {
     pub today: Option<WindowEnd>,
     pub month: Option<WindowEnd>,
+    /// 裝置的 IANA 時區；上游在裝置的日已過期時用它算今天，我們改由 `endsAt` 推出時差（ranges.rs）。
+    pub time_zone: Option<String>,
 }
 
 /// hub aggregate 裡的一台裝置（上游 usage.js `aggregateDevices` 的 devices[]）。
@@ -495,6 +500,27 @@ mod tests {
         let stats: HubStats = serde_json::from_str(json).unwrap();
         assert_eq!(stats.devices[0].periods.today.clients["claude"], 10.0);
         assert_eq!(stats.devices[0].agent_runtime, "electron-widget");
+    }
+
+    #[test]
+    fn period_windows_keep_the_day_key_and_time_zone() {
+        let json = r#"{"devices":[{"deviceId":"d","periodWindows":{"timeZone":"Asia/Taipei",
+            "today":{"key":"2026-09-24","endsAt":"2026-09-24T16:00:00.000Z"},
+            "month":{"key":"2026-09","endsAt":"2026-09-30T16:00:00.000Z"}}},{"deviceId":"old"}]}"#;
+        let stats: HubStats = serde_json::from_str(json).unwrap();
+        let windows = stats.devices[0].period_windows.as_ref().unwrap();
+        let today = windows.today.as_ref().unwrap();
+        assert_eq!(today.key.as_deref(), Some("2026-09-24"));
+        assert_eq!(today.ends_at.as_deref(), Some("2026-09-24T16:00:00.000Z"));
+        assert_eq!(
+            windows.month.as_ref().unwrap().key.as_deref(),
+            Some("2026-09")
+        );
+        assert_eq!(windows.time_zone.as_deref(), Some("Asia/Taipei"));
+        assert!(
+            stats.devices[1].period_windows.is_none(),
+            "an older record without windows still parses"
+        );
     }
 
     /// 最小的 SSE 伺服器：先回 snapshot，再送一個 freshness，最後關連線。

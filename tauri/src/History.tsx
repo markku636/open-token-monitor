@@ -31,7 +31,7 @@ export function HistoryStrip({ history }: { history: HistoryPreview }) {
             title={`${d.date} · ${fmtTokens(d.tokens)} tokens · ${fmtUsd(d.costUsd)}`}
           >
             <div
-              className={`w-full rounded-t-[1px] ${i === last ? "bg-accent" : "bg-accent/45"}`}
+              className={`w-full rounded-t-[1px] ${i === last ? "bg-info" : "bg-info/45"}`}
               style={{ height: heights[i] > 0 ? `${heights[i] * 100}%` : "1px", opacity: heights[i] > 0 ? 1 : 0.25 }}
             />
           </div>

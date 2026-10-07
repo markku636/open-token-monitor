@@ -73,6 +73,8 @@ pub struct SettingsView {
     pub build_channel: &'static str,
     pub app_version: &'static str,
     pub supported_clients: &'static [&'static str],
+    /// 主頁額度與設定頁「主畫面」列出的 provider（上游的 `LIMIT_PROVIDER_CATALOG`，只含支援的）。
+    pub supported_limit_providers: &'static [&'static str],
 }
 
 impl SettingsView {
@@ -90,6 +92,7 @@ impl SettingsView {
             build_channel: crate::baked::BUILD_CHANNEL,
             app_version: crate::baked::AGENT_VERSION,
             supported_clients: crate::settings::SUPPORTED_CLIENTS,
+            supported_limit_providers: crate::settings::SUPPORTED_LIMIT_PROVIDERS,
         }
     }
 }
@@ -144,5 +147,21 @@ impl AppState {
 
     pub fn settings(&self) -> Settings {
         self.settings.read().unwrap().clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_view_lists_the_supported_limit_providers() {
+        let view = serde_json::to_value(SettingsView::from_settings(&Settings::default())).unwrap();
+        assert_eq!(
+            view["supportedLimitProviders"],
+            serde_json::json!(crate::settings::SUPPORTED_LIMIT_PROVIDERS)
+        );
+        assert_eq!(view["hiddenViews"], "status");
+        assert_eq!(view["homeLimitAccountCount"], 3);
     }
 }

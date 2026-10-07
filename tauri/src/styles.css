@@ -2,14 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 語意色彩（深色預設）。以 "R G B" 三元組存放，Tailwind 用 rgb(var(--x) / alpha) 取用。 */
+/* 語意色彩（深色預設）。以 "R G B" 三元組存放，Tailwind 用 rgb(var(--x) / alpha) 取用。
+   --c-app / --c-fg / --c-accent / --c-muted 是上游 themePresets.js 的 DEFAULT_THEME（bg / text / accent /
+   muted），必須與 src/theme.ts 的 DEFAULT_THEME 一致：深色模式選「預設」存 {}，它的 TM1 代碼才會與畫面相符。
+   設定的 themeColors 覆寫時，store.ts applyTheme 在 <html> 上直接設這四個變數。 */
 :root {
-  --c-app: 20 21 27;
+  --c-app: 48 52 56;
   --c-panel: 28 29 37;
   --c-elevated: 38 40 50;
   --c-inset: 14 15 20;
-  --c-fg: 238 238 234;
-  --c-accent: 122 162 255;
+  --c-fg: 238 245 251;
+  --c-muted: 163 173 187;
+  --c-accent: 183 234 212;
   --c-success: 74 222 128;
   --c-warning: 251 191 36;
   --c-danger: 248 113 113;
@@ -22,13 +26,16 @@
   color-scheme: dark;
 }
 
-/* 淺色主題（設定的「主題」或跟隨系統）：只換色票，元件不必知道。 */
+/* 淺色（色彩模式選淺色或跟隨系統，或自訂了淺色背景）：只換色票，元件不必知道。
+   app / fg / accent / muted 就是上游的「瓷白」（Porcelain）配色（src/theme.ts LIGHT_THEME）：淺色時
+   沒覆寫的鍵回到這裡，設定頁的色格與主題代碼也照它算。 */
 :root.light {
-  --c-app: 247 247 249;
+  --c-app: 246 247 249;
   --c-panel: 255 255 255;
   --c-elevated: 238 239 243;
   --c-inset: 234 235 240;
-  --c-fg: 22 23 28;
+  --c-fg: 28 31 38;
+  --c-muted: 91 98 109;
   --c-accent: 37 99 235;
   --c-success: 22 163 74;
   --c-warning: 202 138 4;
@@ -77,6 +84,40 @@ html[data-view="settings"] body {
   font-variant-numeric: tabular-nums;
 }
 
+/* 設定頁的調色盤（上游 styles.css 的 .color-picker-input）。 */
+input[type="color"].color-input {
+  width: 30px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgb(var(--c-fg) / 0.15);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="color"].color-input::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+input[type="color"].color-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
+/* 清單列的品牌圖示（上游 styles.css 的 .row-icon）：SVG 當遮罩、底色是 currentColor，圖示跟著那一列
+   文字的顏色；有些 SVG 把顏色寫死，所以不能直接內嵌。圖檔與尺寸由 BrandMark.tsx 以 inline style 給。 */
+.brand-icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  background-color: currentColor;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
 .scroll-thin {
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--c-fg) / 0.15) transparent;
@@ -96,8 +137,222 @@ html[data-view="settings"] body {
   animation: tm-pulse 1.2s ease-in-out infinite;
 }
 
+/* ---- 資料動畫（上游 styles.css；時間與判斷在 motion.ts，JS 端在 DataMotion.tsx） ---- */
+
+/* 清單的長條：用 transform 縮放而不是改寬度（不重排版面）。比例 --bar-scale 由 DataMotion.tsx 寫，
+   React 不碰；JS 自己在動時會暫時關掉這條 transition（上游 .bar-fill）。 */
+.tm-bar-fill {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  transform: scaleX(var(--bar-scale, 0));
+  transform-origin: left center;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 儀表板的長條沒有 CSS 過場，只有 JS 的 800 ms（上游 .dash-bd-bar-fill）。 */
+.tm-bar-fill.tm-bar-static {
+  transition: none;
+}
+
+/* 趨勢視圖的期間長條：點了開儀表板（上游 .trends-spark）。 */
+.tm-spark {
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 6px 4px;
+  transition: background 120ms ease;
+}
+
+.tm-spark:hover {
+  background: rgb(var(--c-fg) / 0.05);
+}
+
+.tm-spark-bar {
+  transform-origin: bottom center;
+}
+
+/* 主頁活動的熱力圖（上游 .home-activity-scroll / .home-activity-canvas）。 */
+.tm-heat-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  cursor: default;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+  user-select: none;
+}
+
+.tm-heat-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.tm-heat-scroll.is-scrolled {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 9px, #000 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 9px, #000 100%);
+}
+
+.tm-heat-scroll.is-dragging {
+  cursor: grabbing;
+}
+
+.tm-heat {
+  transition:
+    fill 140ms ease,
+    stroke 140ms ease;
+}
+
+/* 上游的光暈是固定的藍色；這裡用主題的強調色（filter 的 id 固定，CSS 才引用得到）。 */
+.tm-heat[data-active="true"],
+.tm-heat-base .tm-heat:hover {
+  filter: url("#tmHeatGlow");
+  stroke: rgb(var(--c-fg) / 0.9);
+  stroke-width: 1;
+}
+
+.tm-heat-glow-shadow {
+  flood-color: rgb(var(--c-accent));
+}
+
+/* 聚光燈下的亮色格子：一整層疊在上面，用游標位置的放射漸層當遮罩。 */
+.tm-heat-bright-layer {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.tm-heat-scroll:hover .tm-heat-bright-layer,
+.tm-heat-scroll:focus-within .tm-heat-bright-layer {
+  opacity: 1;
+}
+
+.tm-heat-bright {
+  fill: rgb(var(--c-fg) / 0.12);
+}
+
+.tm-heat-bright.lvl-1 {
+  fill: rgb(var(--c-accent) / 0.38);
+}
+
+.tm-heat-bright.lvl-2 {
+  fill: rgb(var(--c-accent) / 0.66);
+}
+
+.tm-heat-bright.lvl-3 {
+  fill: rgb(var(--c-accent) / 0.9);
+}
+
+/* 上游最亮一級比底色更接近白色。 */
+.tm-heat-bright.lvl-4 {
+  fill: color-mix(in srgb, rgb(var(--c-accent)) 70%, white);
+}
+
+/* 儀表板的熱力圖進場前先藏起來（上游 dashboard.css .is-motion-pending）。 */
+.tm-heat-pending .tm-heat-base .tm-heat {
+  opacity: 0;
+}
+
+/* 格子的浮動提示（上游 .home-activity-tooltip），掛在 body 上。 */
+.tm-heat-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 72px;
+  padding: 6px 9px;
+  border: 1px solid rgb(var(--c-fg) / 0.16);
+  border-radius: 8px;
+  background: rgb(var(--c-panel) / 0.58);
+  color: rgb(var(--c-fg));
+  box-shadow:
+    0 10px 24px rgb(0 0 0 / 0.18),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  font-size: 10px;
+  line-height: 1.1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-9999px, -9999px);
+  transition: opacity 130ms ease;
+  white-space: nowrap;
+}
+
+.tm-heat-tooltip[data-visible="true"] {
+  opacity: 1;
+}
+
+.tm-heat-tooltip-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-weight: 700;
+}
+
+.tm-heat-tooltip-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.tm-heat-tooltip-label,
+.tm-heat-tooltip-date {
+  color: rgb(var(--c-fg) / 0.45);
+  font-weight: 500;
+}
+
+.tm-heat-tooltip-date {
+  font-size: 9px;
+}
+
+/* 儀表板每日用量圖：堆疊長條從底部長出、K 線實體從中間展開（上游 dashboard.css）。 */
+.tm-bar-stack {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+}
+
+.tm-candle-body {
+  transform-box: fill-box;
+  transform-origin: center center;
+}
+
+/* 額度重置補滿時的亮光（上游 .limit-meter-completion；額度分頁接上時用）。 */
+.tm-limit-completion {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.58);
+  opacity: 0;
+  will-change: opacity;
+}
+
+/* ---- 減少動態效果（上游 styles.css 的總開關，逐字）。 ----
+   設定 `reduceMotion`：system 看系統（媒體查詢）、on 一律、off 一律不減少；
+   <html data-reduce-motion> 由 motionRuntime.ts 與 index.html 的 pre-paint 設定。
+   CSS 管不到 WAAPI 與 rAF，那些由 motionRuntime.prefersReducedMotion() 擋。 */
 @media (prefers-reduced-motion: reduce) {
-  .pulse {
-    animation: none;
+  :root:not([data-reduce-motion="off"]) *,
+  :root:not([data-reduce-motion="off"]) *::before,
+  :root:not([data-reduce-motion="off"]) *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-delay: 0s !important;
+    transition-duration: 0.01ms !important;
   }
+
+  :root:not([data-reduce-motion="off"]) .tm-bar-fill {
+    transition: none;
+  }
+}
+
+:root[data-reduce-motion="on"] *,
+:root[data-reduce-motion="on"] *::before,
+:root[data-reduce-motion="on"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-delay: 0s !important;
+  transition-duration: 0.01ms !important;
 }

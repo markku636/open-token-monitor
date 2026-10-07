@@ -124,7 +124,7 @@ export function clientGradient(clients: { key: string; tokens: number }[], color
 const STABLE_COLORS = ["#6ab4f0", "#cc7c5e", "#a57df0", "#49a3b0", "#f0d66a", "#f06a7b"];
 
 /** 依字串雜湊的固定顏色（上游 sessionRows.js `stableColor`）。 */
-export function stableColor(value: string, colors: string[] = STABLE_COLORS): string {
+export function stableColor(value: string, colors: readonly string[] = STABLE_COLORS): string {
   let hash = 0;
   for (const ch of String(value || "")) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
   return colors[Math.abs(hash) % colors.length] ?? STABLE_COLORS[0];

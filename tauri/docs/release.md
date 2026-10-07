@@ -33,7 +33,7 @@ powershell -ExecutionPolicy Bypass -File .\build-installer.ps1 `
 ## 發佈前後的檢查
 
 1. 乾淨的 VM：人工安裝 → 首次啟動 → 在 hub 的 dashboard 出現 → 用上一版安裝後等自動更新 → 解除安裝。
-2. `https://<hub>/updates/latest.json` 的 `version` 是新版，`https://<hub>/downloads/releases` 列出新版與說明。
+2. `https://<hub>/updates/latest.json` 的 `version` 是新版，`https://<hub>/downloads/releases` 列出新版與說明。widget 更新提示與設定頁的「查看完整版本資訊」會開 `https://<hub>/downloads/releases#v<版本>`，捲到那一版的段落。
 3. dashboard 的「用戶端版本」（`GET /api/custom/client-release`）：落後的裝置會在一小時左右（檢查間隔 ±5 分鐘）陸續下載新版，員工按「重新啟動以更新」後版本才會變。
 
 ## 本機演練（不碰真正的 hub）

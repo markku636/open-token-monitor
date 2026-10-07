@@ -79,7 +79,7 @@ export function DisplaySection({ s }: { s: SettingsView }) {
       </Field>
       {s.currency !== "USD" && <RateField s={s} />}
       <ModelAliasFields s={s} />
-      <Field label={t("服務狀態檢查間隔")} hint={t("額度分頁底部的 Claude、OpenAI、Cursor、DeepSeek 官方狀態")}>
+      <Field label={t("服務狀態檢查間隔")} hint={t("狀態視圖的 Claude、OpenAI、Cursor、DeepSeek 官方狀態")}>
         <Select<number>
           value={s.serviceStatusRefreshMs}
           options={[

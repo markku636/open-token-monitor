@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use super::state::AppState;
@@ -61,6 +62,22 @@ fn feed_url(app: &AppHandle) -> Result<url::Url, update::DisabledReason> {
         &configured_pubkey(app),
         hub.url.as_deref(),
     )
+}
+
+/// 用系統瀏覽器開生效 hub 上的版本頁（`update::release_page_url`）。網址只由這裡組出，前端不能指定，與 `service_status_open` 相同。
+pub fn open_release_page(app: &AppHandle) -> AppResult<()> {
+    let settings = app.state::<AppState>().settings();
+    let hub = crate::settings::resolve_hub(&settings, None, None);
+    let Some(hub_url) = hub.url.as_deref() else {
+        return Err(AppError::HubNotConfigured);
+    };
+    let state = current_state(app);
+    let url = update::release_page_url(Some(hub_url), state.version())
+        .ok_or_else(|| AppError::InvalidArgument("hub 位置無效，無法開啟版本頁".into()))?;
+    tracing::info!(%url, "opening release page");
+    app.opener()
+        .open_url(url.as_str(), None::<&str>)
+        .map_err(|e| AppError::Internal(e.to_string()))
 }
 
 pub fn current_state(app: &AppHandle) -> UpdateState {

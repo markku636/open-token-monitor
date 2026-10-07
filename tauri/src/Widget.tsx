@@ -1,19 +1,24 @@
-// 桌面小工具本體：本機或全公司的今日／本月／全部 token 與等值成本，依工具、模型、專案或 session 拆分。
+// 桌面小工具本體：主頁、本機、狀態、全公司、額度、趨勢六個視圖（上游 id 與順序，見 viewPrefs.ts），
+// 底欄的循環切換鈕換視圖；本機與全公司看今日／本月／全部 token 與等值成本，依工具、模型、專案或 session 拆分。
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LayoutDashboard, Monitor, Pin, PinOff, RefreshCw, Settings as SettingsIcon, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { api, isTauri, type AppStatus, type PeriodDetail, type PeriodName, type PeriodTotals, type RangeName, type WindowMode } from "./api";
 import { BreakdownList } from "./Breakdown";
 import { CompanyPanel, CompanyRangePanel } from "./Company";
-import { ProjectList, SessionList, UsageList, usePeriodDetail } from "./Detail";
+import { ProjectList, SessionList, UsageList, usePeriodDetailEntry } from "./Detail";
+import { AnimatedNumber } from "./DataMotion";
 import { HistoryStrip } from "./History";
 import { BubbleHandle, useBubble, useBubbleSync, useEscToCollapse } from "./Bubble";
 import { LimitsPanel } from "./LimitsPanel";
 import { ServiceStatusPanel } from "./ServiceStatus";
 import { TrendsPanel } from "./Trends";
+import { HomeModules } from "./Home";
+import { BackHomeRow, ViewSwitcher } from "./ViewSwitcher";
+import { availableViewIds, effectiveViewDisplayOrderValue, preferredViewId, VIEW_IDS, visibleViewOrder, type ViewId } from "./viewPrefs";
 import { fmtAgo, fmtTime, fmtTokens, fmtUsd, uncachedInput } from "./format";
-import { useApp, type Breakdown, type Tab } from "./store";
+import { useApp, type Breakdown } from "./store";
 import { t } from "./i18n";
 import { IconButton, Segmented } from "./ui";
 import { zoomFromKey } from "./shortcut";
@@ -21,14 +26,6 @@ import { isRange, MONTH_MODES, monthModeLabel, shortDate, slotOf, weekStartDay }
 import { useFetched } from "./useFetched";
 import { AverageRate, LiveRate } from "./Rate";
 import { UpdatePill } from "./UpdatePill";
-
-const TABS: { value: Tab; label: string }[] = [
-  { value: "local", label: t("本機") },
-  { value: "company", label: t("全公司") },
-  { value: "limits", label: t("額度") },
-  { value: "trends", label: t("趨勢") },
-];
-
 
 function useNow(intervalMs: number) {
   const [now, setNow] = useState(() => Date.now());
@@ -98,7 +95,12 @@ function Header() {
   );
 }
 
-function Totals({ p, span }: { p: PeriodTotals; span?: { start: string; end: string } }) {
+/**
+ * 總數面板；主頁用 `compact`（只有數字、成本與副標，沒有 token 組成，上游主頁的 TOTAL TOKENS）。
+ * 數字從上次看到的值數到新的（上游 app.js render 的 headline）；主頁與本機視圖共用同一份記憶
+ * （上游整個視窗只有一個總數），`periodKey` 換了是換期間（0.8 秒）。成本不動畫（上游相同）。
+ */
+function Totals({ p, periodKey, span, compact }: { p: PeriodTotals; periodKey: string; span?: { start: string; end: string }; compact?: boolean }) {
   const parts = [
     { label: t("快取讀取"), value: p.cacheReadTokens },
     { label: t("快取寫入"), value: p.cacheWriteTokens },
@@ -108,7 +110,7 @@ function Totals({ p, span }: { p: PeriodTotals; span?: { start: string; end: str
   return (
     <div className="px-3">
       <div className="flex items-baseline justify-between">
-        <div className="num text-3xl font-semibold tracking-tight">{fmtTokens(p.totalTokens)}</div>
+        <AnimatedNumber surface="local-headline" value={p.totalTokens} periodKey={periodKey} format={fmtTokens} className="num text-3xl font-semibold tracking-tight" />
         <div className="num text-lg text-fg/80" title={t("依 API 牌價換算的等值成本，不是實際帳單")}>
           {fmtUsd(p.costUsd)}
         </div>
@@ -119,14 +121,16 @@ function Totals({ p, span }: { p: PeriodTotals; span?: { start: string; end: str
         </span>
         <AverageRate p={p} />
       </div>
-      <div className="mt-2 grid grid-cols-4 gap-1">
-        {parts.map((x) => (
-          <div key={x.label} className="rounded-sm bg-inset px-1.5 py-1">
-            <div className="text-2xs text-fg/45">{x.label}</div>
-            <div className="num text-xs">{fmtTokens(x.value)}</div>
-          </div>
-        ))}
-      </div>
+      {!compact && (
+        <div className="mt-2 grid grid-cols-4 gap-1">
+          {parts.map((x) => (
+            <div key={x.label} className="rounded-sm bg-inset px-1.5 py-1">
+              <div className="text-2xs text-fg/45">{x.label}</div>
+              <div className="num text-xs">{fmtTokens(x.value)}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -153,7 +157,7 @@ function OwnerEmailPill() {
   );
 }
 
-function StatusBar() {
+function StatusBar({ order, current, switcherRef }: { order: ViewId[]; current: ViewId; switcherRef: RefObject<HTMLButtonElement> }) {
   const status = useApp((s) => s.status);
   const now = useNow(30_000);
   let text: string;
@@ -177,7 +181,8 @@ function StatusBar() {
     text = t("已上傳 {ago}{next}", { ago: fmtAgo(status.lastUploadAt, now), next });
   }
   return (
-    <footer className="flex items-baseline gap-2 px-3 pb-2 pt-1 text-2xs">
+    <footer className="flex items-center gap-2 px-3 pb-2 pt-1 text-2xs">
+      <ViewSwitcher order={order} current={current} currentRef={switcherRef} />
       <span className={`min-w-0 flex-1 truncate ${tone}`} title={text}>
         {text}
       </span>
@@ -203,31 +208,49 @@ function ResizeGrip() {
 function LocalBreakdown({ p, period }: { p: PeriodTotals; period: PeriodName }) {
   const breakdown = useApp((s) => s.breakdown);
   const projectsEnabled = useApp((s) => s.settings?.projectsEnabled ?? true);
-  const detail = usePeriodDetail(period);
+  // 換期間時先留著上一個期間的明細（keepPrevious），列的身分不斷，新資料到了才從舊數字動過去；
+  // 動畫的期間用資料實際所屬的期間，不是剛選的那個。
+  const entry = usePeriodDetailEntry(period, { keepPrevious: true });
+  const detail = entry?.data ?? null;
   const view = !projectsEnabled && breakdown === "project" ? "client" : breakdown;
+  const motion = { surface: "local-list", periodKey: entry?.key ?? period, viewKey: view };
   const simple = <BreakdownList p={p} by={view === "model" ? "model" : "client"} />;
   if (view === "session") {
     // 沒有 session 明細但有用量時改顯示模型（上游同樣的退路）。
-    return <SessionList key={period} period={period} fallback={detail ? <UsageList rows={detail.models} kind="model" /> : simple} />;
+    return (
+      <SessionList
+        key={period}
+        period={period}
+        motion={{ ...motion, periodKey: period }}
+        fallback={detail ? <UsageList rows={detail.models} kind="model" /> : simple}
+      />
+    );
   }
   if (!detail) return simple;
-  if (view === "project") return <ProjectList rows={detail.projects} />;
-  return <UsageList rows={view === "model" ? detail.models : detail.tools} kind={view === "model" ? "model" : "client"} />;
+  if (view === "project") return <ProjectList rows={detail.projects} motion={motion} />;
+  return <UsageList rows={view === "model" ? detail.models : detail.tools} kind={view === "model" ? "model" : "client"} motion={motion} />;
 }
 
 const centered = (text: string) => <div className="px-3 py-10 text-center text-xs text-fg/45">{text}</div>;
 
 /** 範圍的清單只有工具與模型（每日歷史沒有 session 與專案，上游同樣不提供）。 */
-function RangeBreakdown({ detail }: { detail: PeriodDetail }) {
+function RangeBreakdown({ detail, range }: { detail: PeriodDetail; range: RangeName }) {
   const stored = useApp((s) => s.breakdown);
   const projectsEnabled = useApp((s) => s.settings?.projectsEnabled ?? true);
   const breakdown = !projectsEnabled && stored === "project" ? "client" : stored;
   if (breakdown === "project") return centered(t("此範圍不提供專案明細。"));
   if (breakdown === "session") return centered(t("此範圍不提供 session 明細。"));
-  return <UsageList rows={breakdown === "model" ? detail.models : detail.tools} kind={breakdown === "model" ? "model" : "client"} />;
+  return (
+    <UsageList
+      rows={breakdown === "model" ? detail.models : detail.tools}
+      kind={breakdown === "model" ? "model" : "client"}
+      motion={{ surface: "local-list", periodKey: range, viewKey: breakdown }}
+    />
+  );
 }
 
-function RangePanel({ range }: { range: RangeName }) {
+/** 範圍的本機用量；主頁（`home`）只放精簡的總數與主頁模組，載入、停用與錯誤的說明共用。 */
+function RangePanel({ range, home }: { range: RangeName; home?: boolean }) {
   const local = useApp((s) => s.local);
   const status = useApp((s) => s.status);
   const updateSettings = useApp((s) => s.updateSettings);
@@ -244,19 +267,28 @@ function RangePanel({ range }: { range: RangeName }) {
     );
   }
   if (r.status === "loading") return centered(status?.historyError ? t("歷史記錄暫時無法使用。") : t("正在載入歷史記錄…"));
+  if (home) {
+    return (
+      <>
+        <Totals p={r.totals} periodKey={range} span={r} compact />
+        <HomeModules p={r.totals} selection={range} />
+      </>
+    );
+  }
   return (
     <>
-      <Totals p={r.totals} span={r} />
+      <Totals p={r.totals} periodKey={range} span={r} />
       {local?.history && <HistoryStrip history={local.history} />}
       <div className="mx-3 my-3 border-t border-fg/10" />
-      <RangeBreakdown detail={r.detail} />
+      <RangeBreakdown detail={r.detail} range={range} />
     </>
   );
 }
 
-function LocalPanel() {
+/** 本機視圖；主頁（`home`）用同一份本機數字，但只放精簡的總數與主頁模組（上游主頁同樣看這台電腦）。 */
+function LocalPanel({ home }: { home?: boolean }) {
   const { local, period: selection, ready, error } = useApp();
-  if (isRange(selection)) return <RangePanel range={selection} />;
+  if (isRange(selection)) return <RangePanel range={selection} home={home} />;
   const period = selection;
   const p = local?.periods[period];
   if (!p) {
@@ -266,9 +298,17 @@ function LocalPanel() {
       </div>
     );
   }
+  if (home) {
+    return (
+      <>
+        <Totals p={p} periodKey={period} compact />
+        <HomeModules p={p} selection={period} />
+      </>
+    );
+  }
   return (
     <>
-      <Totals p={p} />
+      <Totals p={p} periodKey={period} />
       {local.history && <HistoryStrip history={local.history} />}
       <div className="mx-3 my-3 border-t border-fg/10" />
       <LocalBreakdown p={p} period={period} />
@@ -343,14 +383,14 @@ function PeriodPicker() {
 }
 
 function BreakdownPicker() {
-  const { tab, breakdown, setBreakdown } = useApp();
+  const { view, breakdown, setBreakdown } = useApp();
   const projectsEnabled = useApp((s) => s.settings?.projectsEnabled ?? true);
   const options: { value: Breakdown; label: string }[] = [
     { value: "client", label: t("工具") },
     { value: "model", label: t("模型") },
   ];
   // 專案與 session 只有本機有（hub 串流只帶工具與模型的彙總）。
-  if (tab === "local") {
+  if (view === "tool") {
     if (projectsEnabled) options.push({ value: "project", label: t("專案") });
     options.push({ value: "session", label: "Session" });
   }
@@ -358,23 +398,26 @@ function BreakdownPicker() {
   return <Segmented size="xs" value={value} options={options} onChange={setBreakdown} />;
 }
 
-function TabBody({ tab }: { tab: Tab }) {
+function TabBody({ view }: { view: ViewId }) {
   const { period, breakdown, company, status, limits, settings } = useApp();
-  if (tab === "company") {
-    // hub 串流只有 today / month / allTime；範圍改用 hub 合併好的每日歷史。
+  if (view === "home") return <LocalPanel home />;
+  if (view === "device") {
+    // hub 串流只有 today / month / allTime；範圍改由各裝置的每日歷史逐台推出（CompanyRangePanel）。
     if (isRange(period)) return <CompanyRangePanel range={period} status={status} breakdown={breakdown === "model" ? "model" : "client"} />;
     return <CompanyPanel company={company} status={status} period={period} breakdown={breakdown === "model" ? "model" : "client"} />;
   }
-  if (tab === "trends") {
+  if (view === "trends") {
     return <TrendsPanel period={period} />;
   }
-  if (tab === "limits") {
+  if (view === "limits") {
+    return <LimitsPanel limits={limits} enabled={settings?.limitsEnabled ?? true} />;
+  }
+  if (view === "status") {
+    // 服務狀態是獨立的視圖（上游 Status，預設隱藏）；只在顯示時輪詢。
     return (
-      <>
-        <LimitsPanel limits={limits} enabled={settings?.limitsEnabled ?? true} />
-        <div className="mx-3 my-3 border-t border-fg/10" />
+      <div className="pt-1">
         <ServiceStatusPanel />
-      </>
+      </div>
     );
   }
   return <LocalPanel />;
@@ -395,13 +438,38 @@ function useZoomKeys() {
   }, [zoom, updateSettings]);
 }
 
+/**
+ * 切換順序裡看得到的視圖與目前顯示的那個（上游 visibleBreakdownOrder / ensureBreakdownVisible）：
+ * 設定的順序與隱藏、功能關閉的視圖拿掉（history 關閉時沒有趨勢），tray 打開的隱藏視圖在離開前留著。
+ */
+function useVisibleViews(): { order: ViewId[]; shown: ViewId } {
+  const view = useApp((s) => s.view);
+  const viewOverride = useApp((s) => s.viewOverride);
+  const settings = useApp((s) => s.settings);
+  const setView = useApp((s) => s.setView);
+  const available = availableViewIds(settings);
+  const input = {
+    ids: VIEW_IDS,
+    orderValue: effectiveViewDisplayOrderValue(settings?.viewDisplayOrder),
+    hiddenValue: settings ? settings.hiddenViews : "status",
+    availableIds: available,
+  };
+  const order = visibleViewOrder({ ...input, includeIds: viewOverride ? [viewOverride] : [] }) as ViewId[];
+  const keep = order.includes(view) || (viewOverride === view && available.includes(view));
+  const shown = keep ? view : (preferredViewId({ ...input, currentId: view }) as ViewId);
+  useEffect(() => {
+    // 設定載入前不決定（還不知道哪些視圖被隱藏），免得把記住的視圖換掉。
+    // 這是修正、不是使用者換視圖（上游 ensureBreakdownVisible 直接 setBreakdown），不算換視圖動畫。
+    if (settings && shown !== view) setView(shown, { quiet: true });
+  }, [settings, shown, view, setView]);
+  return { order, shown };
+}
+
 export default function Widget() {
-  const { tab, setTab } = useApp();
   useZoomKeys();
-  const historyEnabled = useApp((s) => s.settings?.historyEnabled ?? true);
-  // 趨勢是本機 history 畫的：history 關閉時不顯示這個分頁（上游同樣移除 Trends 視圖）。
-  const tabs = historyEnabled ? TABS : TABS.filter((x) => x.value !== "trends");
-  const shownTab = tabs.some((x) => x.value === tab) ? tab : "local";
+  const { order, shown } = useVisibleViews();
+  const homeReturn = useApp((s) => s.homeReturn);
+  const switcherRef = useRef<HTMLButtonElement>(null);
   useBubbleSync();
   useEscToCollapse();
   const collapsed = useBubble((s) => s.collapsed);
@@ -409,21 +477,19 @@ export default function Widget() {
   return (
     <div className="widget-shell relative flex h-full flex-col overflow-hidden">
       <Header />
-      <div className="px-3 pb-2">
-        <Segmented value={shownTab} options={tabs} onChange={setTab} />
-      </div>
-      {shownTab !== "limits" && (
+      {shown !== "limits" && shown !== "status" && (
         <div className="flex flex-wrap items-center justify-between gap-1 px-3 pb-2">
           <PeriodPicker />
-          {shownTab !== "trends" && <BreakdownPicker />}
+          {(shown === "tool" || shown === "device") && <BreakdownPicker />}
         </div>
       )}
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-2">
-        <TabBody tab={shownTab} />
+        {homeReturn && shown !== "home" && <BackHomeRow switcherRef={switcherRef} />}
+        <TabBody view={shown} />
       </div>
       <UpdatePill />
       <OwnerEmailPill />
-      <StatusBar />
+      <StatusBar order={order} current={shown} switcherRef={switcherRef} />
       <ResizeGrip />
     </div>
   );

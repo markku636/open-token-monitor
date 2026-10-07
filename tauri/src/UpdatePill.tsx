@@ -1,12 +1,13 @@
 // widget 底部的更新提示（上游 appUpdatePill + popover）：有新版時「↑ v1.2.3」，下載中顯示百分比，
 // 下載好了換成「v1.2.3 · ↻ 重新啟動」。點版本號打開版本說明；× 忽略這個版本（下載中與下載好的不能忽略）。
+// 「查看完整版本資訊」開 hub 的版本頁（上游開 GitHub release 的 htmlUrl）。
 
 import { useState } from "react";
 import { api, errorMessage, type UpdateState } from "./api";
 import { lang, t } from "./i18n";
 import { parseReleaseNotes, type NoteGroup } from "./releaseNotes";
 import { useApp } from "./store";
-import { updatePillVisible } from "./update";
+import { pillClickAction, updatePillVisible, type PillClickAction } from "./update";
 
 /** 版本說明（設定頁與 widget 的 popover 共用）。 */
 export function ReleaseNotes({ groups }: { groups: NoteGroup[] }) {
@@ -30,12 +31,22 @@ export function notesOf(u: UpdateState | null): NoteGroup[] {
   return u && (u.state === "available" || u.state === "ready") ? parseReleaseNotes(u.notes, lang()) : [];
 }
 
+/** 「查看完整版本資訊」（上游 appUpdateReleaseNotesButton / popover 的 View full release）。 */
+export function ViewReleaseLink({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" className="text-2xs text-accent hover:underline" onClick={onClick}>
+      {t("查看完整版本資訊")}
+    </button>
+  );
+}
 
 export function UpdatePill() {
   const update = useApp((s) => s.update);
   // 忽略的版本記在設定（appUpdateDismissedVersion）：自動下載也會跳過它（上游 dismissedVersion）。
   const dismissed = useApp((s) => s.settings?.appUpdateDismissedVersion ?? "");
   const updateSettings = useApp((s) => s.updateSettings);
+  // 版本頁只在有生效的 hub 時存在（Rust `update::release_page_url`）。
+  const hasPage = useApp((s) => Boolean(s.settings?.hub.url));
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +54,21 @@ export function UpdatePill() {
   const ready = update.state === "ready";
   const downloading = update.state === "downloading";
   const groups = notesOf(update);
+  const click = pillClickAction(update, groups.length > 0, hasPage);
+  const clickTitle: Record<PillClickAction, string | undefined> = {
+    popover: t("v{version} 更新內容", { version: update.version }),
+    release: t("查看完整版本資訊"),
+    download: undefined,
+    none: undefined,
+  };
+  const openRelease = async () => {
+    setError(null);
+    try {
+      await api.updateOpenRelease();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
   const act = async () => {
     setBusy(true);
     setError(null);
@@ -82,15 +108,24 @@ export function UpdatePill() {
               {ready ? t("重新啟動以更新") : t("下載更新")}
             </button>
           )}
+          {hasPage && (
+            <div className={`text-center ${downloading ? "mt-2" : "mt-1.5"}`}>
+              <ViewReleaseLink onClick={() => void openRelease()} />
+            </div>
+          )}
         </div>
       )}
       <div className={`flex items-center gap-2 rounded-sm px-2 py-1 text-2xs ${ready ? "bg-success/15" : "bg-accent/15"}`}>
         <button
           type="button"
           className="num min-w-0 flex-1 truncate text-left hover:underline disabled:no-underline"
-          disabled={busy || (downloading && groups.length === 0)}
-          title={groups.length ? t("v{version} 更新內容", { version: update.version }) : undefined}
-          onClick={() => (groups.length ? setOpen(!open) : void act())}
+          disabled={busy || click === "none"}
+          title={clickTitle[click]}
+          onClick={() => {
+            if (click === "popover") setOpen(!open);
+            else if (click === "release") void openRelease();
+            else if (click === "download") void act();
+          }}
         >
           {label}
         </button>

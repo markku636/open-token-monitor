@@ -4,19 +4,21 @@
 import { useEffect, useState } from "react";
 import type { PeriodTotals } from "./api";
 import { t } from "./i18n";
-import { useApp } from "./store";
+import { onLocalStats, useApp } from "./store";
 import { averageRateText, createLiveTracker, liveRateText, type RateMode } from "./tokenRate";
 
 // 即時速率要看每一次本機更新（不只是底欄顯示時），基準才會是上一筆；所以在模組層級訂閱。
+// 訂閱的是每一筆推送（onLocalStats），不是 store 的 local：視窗看不到時 store 先收著資料，只看 store 的話
+// 打開時會拿藏起來前的最後一筆當基準，把一段早就結束的平均當成剛量到的即時速率
+// （上游 app.js onStatsPush 每一筆都呼叫 observeLiveTokenRate）。
 const live = createLiveTracker();
 let lastDevice = "";
-useApp.subscribe((s, prev) => {
-  if (!s.local || s.local === prev.local) return;
-  if (s.local.deviceId !== lastDevice) {
-    lastDevice = s.local.deviceId;
+onLocalStats((local) => {
+  if (local.deviceId !== lastDevice) {
+    lastDevice = local.deviceId;
     live.reset();
   }
-  live.observe(s.local.periods.today);
+  live.observe(local.periods.today);
 });
 
 function useRateMode(): [RateMode, () => void] {

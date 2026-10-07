@@ -42,6 +42,20 @@ export function updateStatusText(u: UpdateState | null): string {
   }
 }
 
+export type PillClickAction = "popover" | "release" | "download" | "none";
+
+/**
+ * 點更新提示的版本號做什麼（上游 app.js 版本號按鈕的 click 與它的 disabled 條件）：有版本說明就開 popover；
+ * 沒有說明時，已下載的版本開版本頁、不安裝（安裝只走旁邊的「重新啟動」），沒有 hub（沒有版本頁）時不能按；
+ * 有新版就下載；下載中不能按。
+ */
+export function pillClickAction(u: UpdateState, hasNotes: boolean, hasReleasePage: boolean): PillClickAction {
+  if (hasNotes) return "popover";
+  if (u.state === "ready") return hasReleasePage ? "release" : "none";
+  if (u.state === "available") return "download";
+  return "none";
+}
+
 /**
  * widget 要不要顯示更新提示：下載好了一定顯示；有新版或下載中時，除非使用者忽略了這個版本
  * （上游 `showUpdateNotice = downloaded || (hasUpdate && !dismissed)`）。

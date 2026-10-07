@@ -105,9 +105,19 @@ export function smoothLinePath(points: { x: number; y: number }[]): string {
   return path;
 }
 
-/** 面積折線圖（上游 `areaLineChart`，pad 6/6/8/6）。 */
-export function areaChart(rows: { label: string; value: number }[], width: number, height: number) {
-  const pad = { top: 6, right: 6, bottom: 8, left: 6 };
+export interface ChartPad {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** 上游 `areaLineChart` 的預設 pad；主頁活動的趨勢線用 4/3/4/3（app.js `renderHomeTrendsModule`）。 */
+const DEFAULT_PAD: ChartPad = { top: 6, right: 6, bottom: 8, left: 6 };
+export const HOME_TREND_PAD: ChartPad = { top: 4, right: 3, bottom: 4, left: 3 };
+
+/** 面積折線圖（上游 `areaLineChart`）。 */
+export function areaChart(rows: { label: string; value: number }[], width: number, height: number, pad: ChartPad = DEFAULT_PAD) {
   const innerW = Math.max(0, width - pad.left - pad.right);
   const innerH = Math.max(0, height - pad.top - pad.bottom);
   const max = Math.max(1, ...rows.map((r) => num(r.value)));
@@ -132,6 +142,17 @@ export function activityTrend(view: TrendsView): { rows: TrendDay[]; peak: numbe
   const rows = view.daily.slice(-TREND_ROWS);
   const peak = Math.max(0, num(view.summary.peakDayTokens), ...view.daily.map((d) => num(d.tokens)));
   return { rows, peak };
+}
+
+/**
+ * 主頁活動的「活躍 N 天」（上游 app.js `renderHomeTrendsModule` 的 meta）：`year` 數熱力圖裡有 token 的格子
+ * （含往前補到星期日的那幾天，與上游相同）；`all` 用 history summary 的活躍天數，沒有時同樣數格子。
+ */
+export function activeDaysCount(view: TrendsView, map: Heatmap, window: "all" | "year"): number {
+  const cells = map.cells.filter((c) => c.tokens > 0).length;
+  if (window === "year") return cells;
+  const summary = Number(view.summary.activeDays);
+  return Number.isFinite(summary) ? summary : cells;
 }
 
 export interface SeriesPoint {

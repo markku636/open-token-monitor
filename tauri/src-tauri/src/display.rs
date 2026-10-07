@@ -343,9 +343,36 @@ fn slim_from_period(p: &Period) -> SlimPeriod {
     }
 }
 
+/// hub 快照的期間 → wire 的 `Period`：全公司的範圍把它當成那台裝置即時的 today（上游
+/// `rowFromLivePeriod` 讀的欄位）。token 取整、成本照抄；快照沒有 token 組成與速率計數。
+pub(crate) fn slim_to_period(p: &SlimPeriod) -> Period {
+    let counts = |m: &IndexMap<String, f64>| -> CountMap {
+        m.iter()
+            .map(|(k, v)| (k.clone(), v.round() as i64))
+            .collect()
+    };
+    Period {
+        capabilities: crate::wire::Capabilities {
+            token_components: false,
+            throughput: false,
+        },
+        total_tokens: p.total_tokens.round() as i64,
+        cost_usd: p.cost_usd,
+        clients: counts(&p.clients),
+        client_costs: p.client_costs.clone(),
+        models: counts(&p.models),
+        model_costs: p.model_costs.clone(),
+        ..Period::default()
+    }
+}
+
 /// 本機 record 轉成 hub 那一列的形狀（剛收到、不 stale）。
-fn local_as_hub_device(r: &DeviceRecord, now_iso: &str) -> HubDevice {
+pub(crate) fn local_as_hub_device(r: &DeviceRecord, now_iso: &str) -> HubDevice {
     use crate::hub::stream::{SlimPeriodWindows, SlimPeriods, WindowEnd};
+    let window = |w: &crate::wire::PeriodWindow| WindowEnd {
+        ends_at: Some(w.ends_at.clone()),
+        key: Some(w.key.clone()),
+    };
     HubDevice {
         device_id: r.device_id.clone(),
         hostname: r.hostname.clone(),
@@ -360,12 +387,10 @@ fn local_as_hub_device(r: &DeviceRecord, now_iso: &str) -> HubDevice {
         stale: false,
         sync_upload_interval_ms: Some(r.sync_upload_interval_ms as f64),
         period_windows: Some(SlimPeriodWindows {
-            today: Some(WindowEnd {
-                ends_at: Some(r.period_windows.today.ends_at.clone()),
-            }),
-            month: Some(WindowEnd {
-                ends_at: Some(r.period_windows.month.ends_at.clone()),
-            }),
+            today: Some(window(&r.period_windows.today)),
+            month: Some(window(&r.period_windows.month)),
+            time_zone: (!r.period_windows.time_zone.is_empty())
+                .then(|| r.period_windows.time_zone.clone()),
         }),
         periods: SlimPeriods {
             today: slim_from_period(&r.today),
@@ -515,38 +540,15 @@ fn positive_entries(map: &IndexMap<String, f64>) -> Vec<(String, f64)> {
         .collect()
 }
 
-/// 上游 deviceBreakdown.js `deviceBreakdownForPeriod`：依工具分組（餘數成為未分類），每個工具下列模型；
-/// 不含成本。期間已過期（例如昨天關機的電腦的 today）時是空的，與清單上的數字一致。
-pub fn device_detail(
-    hub: &HubStats,
-    local: Option<&DeviceRecord>,
-    device_id: &str,
-    period: &str,
-    now_ms: i64,
-) -> Option<DeviceDetail> {
-    let now_iso = chrono::DateTime::from_timestamp_millis(now_ms)
-        .map(crate::wire::time::iso_millis)
-        .unwrap_or_default();
-    let (device, is_local) = match local.filter(|r| r.device_id == device_id) {
-        Some(r) => (local_as_hub_device(r, &now_iso), true),
-        None => (
-            hub.devices
-                .iter()
-                .find(|d| d.device_id == device_id)?
-                .clone(),
-            false,
-        ),
-    };
-    let empty = SlimPeriod::default();
-    let p = match period {
-        _ if period_expired(&device, period, now_ms) => &empty,
-        "today" => &device.periods.today,
-        "month" => &device.periods.month,
-        "allTime" => &device.periods.all_time,
-        _ => return None,
-    };
-    let total = p.total_tokens.max(0.0);
-    let mut entries = positive_entries(&p.clients);
+/// 上游 deviceBreakdown.js `deviceBreakdownForPeriod`：依工具分組、總量大於各工具加總的餘數成為
+/// 未分類，每個工具下列模型（`client_models` 沒有時是空的）；token 由多到少、同數依 key。不含成本。
+pub(crate) fn device_tools(
+    total: f64,
+    clients: &IndexMap<String, f64>,
+    client_models: Option<&IndexMap<String, IndexMap<String, f64>>>,
+) -> Vec<DeviceTool> {
+    let total = total.max(0.0);
+    let mut entries = positive_entries(clients);
     let attributed: f64 = entries.iter().map(|(_, v)| v).sum();
     if total - attributed > 0.0 {
         entries.push((crate::detail::UNATTRIBUTED.to_string(), total - attributed));
@@ -554,9 +556,8 @@ pub fn device_detail(
     let mut tools: Vec<DeviceTool> = entries
         .into_iter()
         .map(|(client, value)| {
-            let mut models: Vec<(String, i64)> = p
-                .client_models
-                .get(&client)
+            let mut models: Vec<(String, i64)> = client_models
+                .and_then(|m| m.get(&client))
                 .map(positive_entries)
                 .unwrap_or_default()
                 .into_iter()
@@ -576,7 +577,38 @@ pub fn device_detail(
         })
         .collect();
     tools.sort_by(|a, b| b.tokens.cmp(&a.tokens).then_with(|| a.key.cmp(&b.key)));
-    Some(DeviceDetail {
+    tools
+}
+
+/// 點開的那台裝置：本機那台用最新的本機 record（`received_at` 是現在），其他取 hub 快照。
+fn find_device(
+    hub: &HubStats,
+    local: Option<&DeviceRecord>,
+    device_id: &str,
+    now_ms: i64,
+) -> Option<(HubDevice, bool)> {
+    let now_iso = chrono::DateTime::from_timestamp_millis(now_ms)
+        .map(crate::wire::time::iso_millis)
+        .unwrap_or_default();
+    match local.filter(|r| r.device_id == device_id) {
+        Some(r) => Some((local_as_hub_device(r, &now_iso), true)),
+        None => Some((
+            hub.devices
+                .iter()
+                .find(|d| d.device_id == device_id)?
+                .clone(),
+            false,
+        )),
+    }
+}
+
+fn detail_for(
+    device: HubDevice,
+    is_local: bool,
+    total: f64,
+    tools: Vec<DeviceTool>,
+) -> DeviceDetail {
+    DeviceDetail {
         device_id: device.device_id,
         platform: device.platform,
         os_name: device.os_name,
@@ -585,9 +617,134 @@ pub fn device_detail(
         agent_version: device.agent_version,
         received_at: device.received_at.or(device.updated_at),
         is_local,
-        total_tokens: total.round() as i64,
+        total_tokens: total.max(0.0).round() as i64,
         tools,
-    })
+    }
+}
+
+/// 一台裝置 today / month / allTime 的明細。期間已過期（例如昨天關機的電腦的 today）時是空的，
+/// 與清單上的數字一致。
+pub fn device_detail(
+    hub: &HubStats,
+    local: Option<&DeviceRecord>,
+    device_id: &str,
+    period: &str,
+    now_ms: i64,
+) -> Option<DeviceDetail> {
+    let (device, is_local) = find_device(hub, local, device_id, now_ms)?;
+    let empty = SlimPeriod::default();
+    let p = match period {
+        _ if period_expired(&device, period, now_ms) => &empty,
+        "today" => &device.periods.today,
+        "month" => &device.periods.month,
+        "allTime" => &device.periods.all_time,
+        _ => return None,
+    };
+    let total = p.total_tokens;
+    let tools = device_tools(total, &p.clients, Some(&p.client_models));
+    Some(detail_for(device, is_local, total, tools))
+}
+
+/// 全公司範圍點開一台裝置：那台推出的範圍期間（`ranges::company_ranges`）依工具拆分。推出的期間沒有
+/// 工具 → 模型的拆分（上游 `derivePeriod` 的 `clientModels: false`），所以工具底下沒有模型。
+pub fn range_device_detail(
+    hub: &HubStats,
+    local: Option<&DeviceRecord>,
+    device_id: &str,
+    period: &Period,
+    now_ms: i64,
+) -> Option<DeviceDetail> {
+    let (device, is_local) = find_device(hub, local, device_id, now_ms)?;
+    let clients: IndexMap<String, f64> = period
+        .clients
+        .iter()
+        .map(|(k, v)| (k.clone(), *v as f64))
+        .collect();
+    let total = period.total_tokens as f64;
+    Some(detail_for(
+        device,
+        is_local,
+        total,
+        device_tools(total, &clients, None),
+    ))
+}
+
+// ---- 全公司的範圍：逐台清單 --------------------------------------------------------
+
+/// 全公司範圍的裝置清單一列（名稱、狀態取自 `CompanyStats`，數字是那台推出的範圍）。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RangeDeviceRow {
+    pub device_id: String,
+    pub hostname: String,
+    pub platform: String,
+    pub os_name: Option<String>,
+    pub agent_runtime: String,
+    pub agent_version: String,
+    pub is_local: bool,
+    pub stale: bool,
+    pub age_ms: Option<i64>,
+    /// `false`：這台沒有可用的每日歷史（即時數字是 0 也一樣，範圍內仍可能有用量），不計入總數
+    /// （與上游的差異，見 ranges.rs `company_ranges`）。
+    pub available: bool,
+    pub total_tokens: i64,
+    pub cost_usd: f64,
+    /// 這段範圍用最多 token 的工具。
+    pub top_client: Option<String>,
+}
+
+fn top_count(map: &CountMap) -> Option<String> {
+    map.iter()
+        .filter(|(_, v)| **v > 0)
+        .max_by_key(|(_, v)| **v)
+        .map(|(k, _)| k.clone())
+}
+
+/// 推出的範圍 + 全公司視圖的裝置列 → 清單：有數字的依 token 由多到少，再依名稱；沒有可用每日歷史的
+/// 排在最後、依名稱。
+pub fn range_device_rows(
+    devices: &[crate::ranges::DeviceRange],
+    company: &CompanyStats,
+) -> Vec<RangeDeviceRow> {
+    let meta: std::collections::HashMap<&str, &DeviceRow> = company
+        .devices
+        .iter()
+        .map(|d| (d.device_id.as_str(), d))
+        .collect();
+    let mut rows: Vec<RangeDeviceRow> = devices
+        .iter()
+        .map(|d| {
+            let m = meta.get(d.device_id.as_str());
+            let available = d.status == crate::ranges::DeviceRangeStatus::Ready;
+            RangeDeviceRow {
+                device_id: d.device_id.clone(),
+                hostname: m.map(|m| m.hostname.clone()).unwrap_or_default(),
+                platform: m.map(|m| m.platform.clone()).unwrap_or_default(),
+                os_name: m.and_then(|m| m.os_name.clone()),
+                agent_runtime: m.map(|m| m.agent_runtime.clone()).unwrap_or_default(),
+                agent_version: m.map(|m| m.agent_version.clone()).unwrap_or_default(),
+                is_local: m.is_some_and(|m| m.is_local),
+                stale: m.is_some_and(|m| m.stale),
+                age_ms: m.and_then(|m| m.age_ms),
+                available,
+                total_tokens: if available { d.period.total_tokens } else { 0 },
+                cost_usd: if available { d.period.cost_usd } else { 0.0 },
+                top_client: if available {
+                    top_count(&d.period.clients)
+                } else {
+                    None
+                },
+            }
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.available
+            .cmp(&a.available)
+            .then(b.total_tokens.cmp(&a.total_tokens))
+            .then_with(|| a.hostname.cmp(&b.hostname))
+            .then_with(|| a.device_id.cmp(&b.device_id))
+    });
+    rows
 }
 
 #[cfg(test)]
@@ -610,10 +767,13 @@ mod tests {
             period_windows: Some(SlimPeriodWindows {
                 today: Some(WindowEnd {
                     ends_at: Some(today_ends.into()),
+                    ..WindowEnd::default()
                 }),
                 month: Some(WindowEnd {
                     ends_at: Some("2026-09-30T16:00:00.000Z".into()),
+                    ..WindowEnd::default()
                 }),
+                ..SlimPeriodWindows::default()
             }),
             periods: SlimPeriods {
                 today: SlimPeriod {
@@ -776,5 +936,173 @@ mod tests {
         assert_eq!(me.today.total_tokens, 999);
         assert!(!me.stale);
         assert_eq!(stats.devices[0].device_id, "me");
+    }
+
+    #[test]
+    fn the_local_row_carries_its_day_keys_and_time_zone() {
+        let mut record = DeviceRecord::compose(
+            &crate::wire::Envelope {
+                device_id: "me".into(),
+                ..crate::wire::Envelope::default()
+            },
+            &crate::wire::UsageSummary::default(),
+            0,
+            None,
+            None,
+        );
+        record.period_windows.time_zone = "Asia/Taipei".into();
+        record.period_windows.today.key = "2026-09-24".into();
+        record.period_windows.today.ends_at = "2026-09-24T16:00:00.000Z".into();
+        record.period_windows.month.key = "2026-09".into();
+        let d = local_as_hub_device(&record, NOW);
+        let w = d.period_windows.unwrap();
+        assert_eq!(w.today.as_ref().unwrap().key.as_deref(), Some("2026-09-24"));
+        assert_eq!(
+            w.today.as_ref().unwrap().ends_at.as_deref(),
+            Some("2026-09-24T16:00:00.000Z")
+        );
+        assert_eq!(w.month.unwrap().key.as_deref(), Some("2026-09"));
+        assert_eq!(w.time_zone.as_deref(), Some("Asia/Taipei"));
+        record.period_windows.time_zone.clear();
+        assert_eq!(
+            local_as_hub_device(&record, NOW)
+                .period_windows
+                .unwrap()
+                .time_zone,
+            None
+        );
+    }
+
+    #[test]
+    fn a_range_detail_has_an_unattributed_rest_and_no_models() {
+        let stats = hub(vec![device(
+            "a",
+            100.0,
+            "2026-09-24T02:58:00.000Z",
+            "2026-09-24T16:00:00.000Z",
+        )]);
+        let mut period = Period {
+            total_tokens: 1000,
+            ..Period::default()
+        };
+        period.clients.insert("codex".into(), 300);
+        period.clients.insert("claude".into(), 600);
+        period.clients.insert("zero".into(), 0);
+        let d = range_device_detail(&stats, None, "a", &period, now_ms()).unwrap();
+        let tools: Vec<(&str, i64)> = d.tools.iter().map(|t| (t.key.as_str(), t.tokens)).collect();
+        assert_eq!(
+            tools,
+            [("claude", 600), ("codex", 300), ("__unattributed", 100)]
+        );
+        assert!(d.tools.iter().all(|t| t.models.is_empty()));
+        assert_eq!(d.total_tokens, 1000);
+        assert!((d.tools[0].percent - 60.0).abs() < 1e-9);
+        assert_eq!(d.received_at.as_deref(), Some("2026-09-24T02:58:00.000Z"));
+        assert!(range_device_detail(&stats, None, "ghost", &period, now_ms()).is_none());
+        let empty = range_device_detail(&stats, None, "a", &Period::default(), now_ms()).unwrap();
+        assert!(empty.tools.is_empty());
+    }
+
+    #[test]
+    fn slim_periods_become_live_today_periods() {
+        let p = slim_to_period(&SlimPeriod {
+            total_tokens: 10.4,
+            cost_usd: 0.25,
+            clients: [("claude".to_string(), 9.6)].into_iter().collect(),
+            client_costs: [("claude".to_string(), 0.25)].into_iter().collect(),
+            models: [("m".to_string(), 10.0)].into_iter().collect(),
+            model_costs: [("m".to_string(), 0.25)].into_iter().collect(),
+            ..SlimPeriod::default()
+        });
+        assert_eq!(p.total_tokens, 10);
+        assert_eq!(p.clients["claude"], 10);
+        assert_eq!(p.client_costs["claude"], 0.25);
+        assert_eq!(p.models["m"], 10);
+        assert!(!p.capabilities.token_components && !p.capabilities.throughput);
+    }
+
+    #[test]
+    fn range_rows_list_counted_devices_first_by_tokens() {
+        use crate::ranges::{DeviceRange, DeviceRangeStatus};
+        let company = compose_company(
+            &hub(vec![
+                device(
+                    "a",
+                    1.0,
+                    "2026-09-24T02:58:00.000Z",
+                    "2026-09-24T16:00:00.000Z",
+                ),
+                device(
+                    "b",
+                    1.0,
+                    "2026-09-23T02:00:00.000Z",
+                    "2026-09-24T16:00:00.000Z",
+                ),
+                device(
+                    "c",
+                    1.0,
+                    "2026-09-24T02:58:00.000Z",
+                    "2026-09-24T16:00:00.000Z",
+                ),
+                device(
+                    "d",
+                    1.0,
+                    "2026-09-24T02:58:00.000Z",
+                    "2026-09-24T16:00:00.000Z",
+                ),
+            ]),
+            None,
+            now_ms(),
+        );
+        let ready = |id: &str, tokens: i64, top: &str| {
+            let mut period = Period {
+                total_tokens: tokens,
+                cost_usd: tokens as f64 / 100.0,
+                ..Period::default()
+            };
+            period.clients.insert("codex".into(), 1);
+            period.clients.insert(top.into(), tokens - 1);
+            DeviceRange {
+                device_id: id.into(),
+                status: DeviceRangeStatus::Ready,
+                start: "2026-09-18".into(),
+                end: "2026-09-24".into(),
+                period,
+            }
+        };
+        let unavailable = |id: &str| DeviceRange {
+            device_id: id.into(),
+            status: DeviceRangeStatus::Unavailable,
+            start: String::new(),
+            end: String::new(),
+            period: Period::default(),
+        };
+        let rows = range_device_rows(
+            &[
+                unavailable("d"),
+                ready("a", 50, "claude"),
+                unavailable("b"),
+                ready("c", 90, "cursor"),
+            ],
+            &company,
+        );
+        let order: Vec<(&str, bool, i64)> = rows
+            .iter()
+            .map(|r| (r.device_id.as_str(), r.available, r.total_tokens))
+            .collect();
+        assert_eq!(
+            order,
+            [
+                ("c", true, 90),
+                ("a", true, 50),
+                ("b", false, 0),
+                ("d", false, 0)
+            ]
+        );
+        assert_eq!(rows[0].hostname, "C");
+        assert_eq!(rows[0].top_client.as_deref(), Some("cursor"));
+        assert!((rows[0].cost_usd - 0.9).abs() < 1e-9);
+        assert!(rows[2].stale, "B last uploaded a day ago");
+        assert_eq!(rows[2].top_client, None);
     }
 }

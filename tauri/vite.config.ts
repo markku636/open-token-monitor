@@ -33,5 +33,7 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts"],
     setupFiles: ["src/test-setup.ts"],
+    // vitest 預設把 CSS 換成空字串（連 ?raw 也是）；theme.test.ts 要讀 styles.css 的色票，確認與 DEFAULT_THEME 一致。
+    css: { include: [/\/src\/styles\.css/] },
   },
 });

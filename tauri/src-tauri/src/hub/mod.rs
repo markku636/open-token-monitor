@@ -1,9 +1,11 @@
-//! 公司 hub 的 client：上傳（`POST /api/ingest`）與健康檢查。
+//! 公司 hub 的 client：上傳（`POST /api/ingest`）、健康檢查，以及全公司範圍要讀的每日歷史
+//! （`/api/history`、`device_daily.rs` 的 `/api/custom/device-daily`）。
 //!
 //! hub 端是上游 `src/hub/server.js` 加上 monorepo 根目錄的 `hub/` overlay；client 角色的 secret 只能
 //! ingest 與讀取（overlay 的 hub/access.js）。TLS 用 rustls + Windows 憑證庫（reqwest
 //! `rustls-tls-native-roots`），企業內部 CA 簽的憑證不需額外設定。
 
+pub mod device_daily;
 pub mod payload;
 pub mod stream;
 
@@ -253,7 +255,7 @@ impl HubClient {
     }
 
     /// `GET /api/history`：hub 把所有有上傳每日歷史的裝置合併成一份（上游 `aggregateHistory`）。
-    /// 全公司分頁的本星期／最近 7、30 日用它。
+    /// hub 沒有 `/api/custom/device-daily` 時，全公司分頁的本星期／最近 7、30 日退回用它。
     pub async fn get_history(&self) -> Result<serde_json::Value, HubError> {
         let resp = self
             .authorized(self.http.get(format!("{}/api/history", self.base)))

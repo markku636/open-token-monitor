@@ -1,9 +1,11 @@
-// 額度分頁底部的「服務狀態」（上游的 Status 視圖）：Claude、OpenAI、Cursor、DeepSeek 的官方狀態頁。
+// 「狀態」視圖（上游的 Status 視圖，預設隱藏）：Claude、OpenAI、Cursor、DeepSeek 的官方狀態頁。
 // 顯示時每 serviceStatusRefreshMs 檢查一次（0 = 只在按重新整理時），點一列開官方狀態頁。
 
 import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api, type ServiceStatus } from "./api";
+import { RowMark, useToolIcons } from "./BrandMark";
+import { serviceStatusIconId } from "./brandIcons";
 import { t } from "./i18n";
 import { useApp } from "./store";
 import { IconButton } from "./ui";
@@ -45,6 +47,8 @@ function meta(p: ServiceStatus): string {
 
 export function ServiceStatusPanel() {
   const refreshMs = useApp((s) => s.settings?.serviceStatusRefreshMs ?? 60_000);
+  const icons = useToolIcons();
+  const indent = icons ? "pl-9" : "pl-3.5";
   const [list, setList] = useState<ServiceStatus[] | null>(lastList);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -94,11 +98,15 @@ export function ServiceStatusPanel() {
                 >
                   <div className="flex items-center gap-2 text-xs">
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} />
+                    {/* 上游 renderServiceStatus 在名稱前畫 14px 的服務圖示（OpenAI 用 Codex 的）；Tauri 以色點表示
+                        狀態，所以保留色點，圖示放在色點與名稱之間。 */}
+                    {icons && <RowMark mark={{ kind: "icon", id: serviceStatusIconId(p.id) }} size={14} />}
                     <span className="flex-1 truncate">{p.label}</span>
                     <span className="shrink-0 text-2xs text-fg/55">{tone.label}</span>
                   </div>
-                  {line && <div className="truncate pl-3.5 text-2xs text-fg/55">{line}</div>}
-                  <div className="truncate pl-3.5 text-2xs text-fg/35">
+                  {/* 下面兩行對齊名稱：色點 6px + 間距 8px，有圖示時再加 14px + 8px。 */}
+                  {line && <div className={`truncate ${indent} text-2xs text-fg/55`}>{line}</div>}
+                  <div className={`truncate ${indent} text-2xs text-fg/35`}>
                     {[meta(p), ago(p.checkedAt, now)].filter(Boolean).join(" · ")}
                   </div>
                 </button>

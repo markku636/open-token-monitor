@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { TrendsView } from "./api";
 import {
+  activeDaysCount,
   activityStats,
   activityTrend,
   addDays,
   areaChart,
   fmtActiveDuration,
+  HOME_TREND_PAD,
   heatmapIntensity,
   periodSeries,
   rollingYearHeatmap,
@@ -71,6 +73,20 @@ describe("trendsFormat", () => {
     expect(chart.points[0]).toMatchObject({ x: 6, y: 62 });
     expect(chart.points[1]).toMatchObject({ x: 294, y: 6 });
     expect(chart.area.endsWith("L294,62 L6,62 Z")).toBe(true);
+    // 主頁活動的趨勢線 pad 4/3/4/3（上游 renderHomeTrendsModule）。
+    const home = areaChart([{ label: "a", value: 0 }, { label: "b", value: 10 }], 300, 70, HOME_TREND_PAD);
+    expect(home.points[0]).toMatchObject({ x: 3, y: 66 });
+    expect(home.points[1]).toMatchObject({ x: 297, y: 4 });
+  });
+
+  it("counts active days for the last 12 months including the Sunday padding", () => {
+    const v = view();
+    // 2025-10-01 是星期三：熱力圖往前補到 09-28（星期日），那幾天有用量也算。
+    v.daily = [day("2025-09-27", 5), day("2025-09-29", 5), day("2026-09-24", 5)];
+    v.summary.activeDays = 40;
+    const map = rollingYearHeatmap(v.daily, v.today, "tokens");
+    expect(activeDaysCount(v, map, "year")).toBe(2);
+    expect(activeDaysCount(v, map, "all")).toBe(40);
   });
 
   it("uses the last 45 rows and the higher peak for the trend line", () => {

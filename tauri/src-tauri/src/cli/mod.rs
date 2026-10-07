@@ -199,6 +199,26 @@ enum Command {
         #[arg(long, default_value_t = 0.0)]
         cost: f64,
     },
+    /// 相容測試用：由固定的輸入逐台推全公司的本星期／最近 7、30 日，印 JSON（ranges.rs `CompanyRanges`）。
+    /// 輸入是 `{devices:[{deviceId, periods, periodWindows, deviceDaily}]}`，`deviceDaily` 是 hub
+    /// `/api/custom/device-daily` 的一台；走 GUI 同一條路徑（`company_range_sources` → `company_ranges`）。
+    #[command(hide = true)]
+    DeviceRanges {
+        #[arg(long)]
+        input: PathBuf,
+        /// week / last7 / last30
+        #[arg(long)]
+        range: String,
+        /// 一週從星期幾開始（0 = 星期日）
+        #[arg(long, default_value_t = 1)]
+        week_start: u32,
+        /// 現在的時間（RFC 3339）
+        #[arg(long)]
+        now: String,
+        /// 觀看者的今天（YYYY-MM-DD；沒有可計入的裝置時用它的範圍）
+        #[arg(long)]
+        today: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -230,6 +250,7 @@ const SUBCOMMANDS: &[&str] = &[
     "secret",
     "settings",
     "session-detail",
+    "device-ranges",
     "help",
 ];
 
@@ -1113,6 +1134,52 @@ async fn cmd_doctor(cli: &Cli, ctx: Context) -> AppResult<()> {
     }
 }
 
+fn cmd_device_ranges(
+    input: &std::path::Path,
+    range: &str,
+    week_start: u32,
+    now: &str,
+    today: &str,
+) -> AppResult<()> {
+    use crate::hub::device_daily::{DeviceDaily, DeviceDailyPayload};
+    use crate::hub::stream::{HubDevice, HubStats};
+    let bad =
+        |what: &str, e: &dyn std::fmt::Display| AppError::InvalidArgument(format!("{what}: {e}"));
+    let name = crate::ranges::RangeName::parse(range)
+        .ok_or_else(|| AppError::InvalidArgument(format!("unknown range {range}")))?;
+    let now_ms = chrono::DateTime::parse_from_rfc3339(now)
+        .map_err(|e| bad("--now", &e))?
+        .timestamp_millis();
+    let text = std::fs::read_to_string(input).map_err(|e| bad("--input", &e))?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| bad("--input", &e))?;
+    let mut hub = HubStats::default();
+    let mut payload = DeviceDailyPayload::default();
+    for device in value
+        .get("devices")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let d: HubDevice = serde_json::from_value(device.clone()).map_err(|e| bad("device", &e))?;
+        if let Some(daily) = device.get("deviceDaily").filter(|v| !v.is_null()) {
+            let mut entry: DeviceDaily =
+                serde_json::from_value(daily.clone()).map_err(|e| bad("deviceDaily", &e))?;
+            if entry.device_id.is_empty() {
+                entry.device_id = d.device_id.clone();
+            }
+            payload.devices.push(entry);
+        }
+        hub.devices.push(d);
+    }
+    let histories = payload.histories();
+    let sources = crate::ranges::company_range_sources(&hub, None, &histories, None);
+    print_json(
+        &crate::ranges::company_ranges(&sources, name, week_start, today, now_ms),
+        true,
+    );
+    Ok(())
+}
+
 fn cmd_secret(action: SecretAction) -> AppResult<()> {
     match action {
         SecretAction::Set { from_env } => {
@@ -1200,6 +1267,13 @@ pub async fn run(cli: Cli) -> ExitCode {
                 print_json(&detail, true);
                 Ok(())
             }
+            Command::DeviceRanges {
+                ref input,
+                ref range,
+                week_start,
+                ref now,
+                ref today,
+            } => cmd_device_ranges(input, range, week_start, now, today),
         }
     }
     .await;

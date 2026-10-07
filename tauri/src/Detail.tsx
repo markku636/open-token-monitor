@@ -3,7 +3,7 @@
 // 版面與規則對應上游 renderer 的 breakdown 清單（app.js renderBreakdownRow 與各 *Rows.js）。
 
 import { ChevronRight } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   api,
   type PeriodDetail,
@@ -15,7 +15,9 @@ import {
   type Share,
   type UsageRow,
 } from "./api";
-import { clientLabel, seriesColor } from "./clients";
+import { RowMark, useToolIcons } from "./BrandMark";
+import { iconKindFor } from "./brandIcons";
+import { clientLabel } from "./clients";
 import {
   barWidth,
   callsLabel,
@@ -35,24 +37,47 @@ import { fmtTokens, fmtUsd } from "./format";
 import { t } from "./i18n";
 import { useApp, type ToolDetailMode } from "./store";
 import { Segmented } from "./ui";
-import { useFetched } from "./useFetched";
+import { useFetched, useFetchedEntry, type FetchedEntry, type FetchedOptions } from "./useFetched";
+import { useListMotion, type ListMotion, type MotionRow } from "./DataMotion";
+import { useVendorColors } from "./useVendorColors";
+import { clientColor, FALLBACK_MODEL_COLORS, modelColor, type VendorColorMap } from "./vendorColors";
 
 /** 支援逐回合明細的工具（src-tauri/src/session_detail.rs `DETAIL_CLIENTS`）。 */
 const DETAIL_CLIENTS = ["claude", "codex", "opencode"];
 import { foldNames, foldRows } from "./modelAliases";
 import { useResolveModel } from "./useModelAlias";
 
-export function usePeriodDetail(period: PeriodName): PeriodDetail | null {
-  return useFetched(() => api.usageDetail(period), period);
+export function usePeriodDetail(period: PeriodName, opts?: FetchedOptions): PeriodDetail | null {
+  return usePeriodDetailEntry(period, opts)?.data ?? null;
+}
+
+/** 同上，另外帶回資料所屬的期間（`keepPrevious` 時新期間的資料到之前是上一個期間）。 */
+export function usePeriodDetailEntry(period: PeriodName, opts?: FetchedOptions): FetchedEntry<PeriodDetail> | null {
+  return useFetchedEntry(() => api.usageDetail(period), period, undefined, opts);
 }
 
 const empty = (text: string) => <div className="px-3 py-6 text-center text-xs text-fg/40">{text}</div>;
 
-function Bar({ width, background }: { width: number; background: string }) {
+/**
+ * 列下方的長條（上游 .bar-fill）：用 `--bar-scale` 縮放。有動畫的清單由 useListMotion 寫比例
+ * （不傳 `scale`），靜態的清單（session 逐回合明細）直接給 `scale`、沒有過場。
+ */
+function Bar({ background, scale }: { background: string; scale?: number }) {
+  const style: CSSProperties & { "--bar-scale"?: number } = scale === undefined ? { background } : { background, "--bar-scale": scale };
   return (
-    <div className="mt-0.5 h-1 rounded-full bg-fg/10">
-      {width > 0 && <div className="h-1 rounded-full" style={{ width: `${width}%`, background }} />}
+    <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-fg/10">
+      <div className={scale === undefined ? "tm-bar-fill" : "tm-bar-fill tm-bar-static"} style={style} />
     </div>
+  );
+}
+
+/** 有動畫的列右邊的文字：token 數由 useListMotion 寫進空的 span（React 不放子節點），後面接成本等。 */
+function MotionRight({ rest }: { rest: string }) {
+  return (
+    <>
+      <span data-motion-number="" />
+      {rest}
+    </>
   );
 }
 
@@ -68,6 +93,7 @@ function Row({
   onClick,
   children,
   leading,
+  motionKey,
 }: {
   title: ReactNode;
   titleHint?: string;
@@ -80,6 +106,8 @@ function Row({
   onClick?: () => void;
   children?: ReactNode;
   leading?: ReactNode;
+  /** useListMotion 用來對應這一列（`data-motion-key`）。 */
+  motionKey?: string;
 }) {
   const expandable = Boolean(onToggle && children);
   const head = (
@@ -101,7 +129,7 @@ function Row({
     </>
   );
   return (
-    <li>
+    <li data-motion-key={motionKey}>
       {expandable ? (
         <button type="button" className="block w-full text-left" aria-expanded={expanded} onClick={onToggle}>
           {head}
@@ -168,30 +196,40 @@ function ModelLines({ tool, models }: { tool: UsageRow; models: Share[] }) {
 }
 
 /** 工具或模型的清單。工具列展開後可切換 token 組成與模型拆分。 */
-export function UsageList({ rows, kind }: { rows: UsageRow[]; kind: "client" | "model" }) {
+export function UsageList({ rows, kind, motion }: { rows: UsageRow[]; kind: "client" | "model"; motion?: ListMotion }) {
   const [open, setOpen] = useState<string | null>(null);
   const mode = useApp((s) => s.toolDetailMode);
   const setMode = useApp((s) => s.setToolDetailMode);
   const resolve = useResolveModel();
+  const list = useRef<HTMLUListElement>(null);
+  const colors = useVendorColors();
+  const icons = useToolIcons();
   // 模型列（與工具下的模型）依設定的別名合併，只影響顯示。
   const shown = visibleShares(kind === "model" ? foldRows(rows, resolve) : rows);
-  if (!shown.length) return empty(t("這段期間沒有用量"));
   const max = Math.max(...shown.map((r) => r.tokens), 0);
   const total = shown.reduce((s, r) => s + r.tokens, 0);
+  useListMotion(list, shown.map((r): MotionRow => ({ key: r.key, value: r.tokens, scale: barWidth(r.tokens, max) / 100 })), fmtTokens, motion);
+  if (!shown.length) return empty(t("這段期間沒有用量"));
   return (
-    <ul className="space-y-1.5 px-3">
-      {shown.map((r, i) => {
+    <ul ref={list} className="relative space-y-1.5 px-3">
+      {shown.map((r) => {
         const models = kind === "client" ? visibleShares(foldRows(r.models ?? [], resolve)) : [];
         const canExpand = r.tokens > 0 && (r.components !== null || models.length > 0);
         const effective: ToolDetailMode = mode === "models" && models.length > 0 ? "models" : r.components ? "tokens" : "models";
-        const color = r.unattributed ? seriesColor("__other", 0) : seriesColor(r.key, i);
+        // 上游 toolRowsForPeriod / modelRowsForPeriod：工具用廠商色（未分類用 default）、模型用 modelColor
+        //（未分類照上游一樣以名稱雜湊）。
+        const color = kind === "client" ? clientColor(colors, r.key) : modelColor(colors, r.key);
         return (
           <Row
             key={r.key}
+            motionKey={r.key}
             title={shareLabel(r.key, r.unattributed, kind)}
             titleHint={r.key}
-            right={`${fmtTokens(r.tokens)} · ${fmtUsd(r.costUsd)} · ${detailPercentLabel(total > 0 ? (r.tokens / total) * 100 : 0)}`}
-            bar={<Bar width={barWidth(r.tokens, max)} background={color} />}
+            // 上游 iconKindFor：工具看 clientsWithIcon（未分類畫色點）、模型看廠商（認不出的畫 Σ）。
+            // 模型用別名合併後的 key，也就是畫面上的名稱。
+            leading={<RowMark mark={iconKindFor({ key: r.key }, kind === "client" ? "tool" : "model", icons)} color={color} />}
+            right={<MotionRight rest={` · ${fmtUsd(r.costUsd)} · ${detailPercentLabel(total > 0 ? (r.tokens / total) * 100 : 0)}`} />}
+            bar={<Bar background={color} />}
             expanded={open === r.key}
             onToggle={canExpand ? () => setOpen(open === r.key ? null : r.key) : undefined}
           >
@@ -220,27 +258,32 @@ export function UsageList({ rows, kind }: { rows: UsageRow[]; kind: "client" | "
   );
 }
 
-/** 上游 usageCharts.js 的 fallbackModelColors（專案的固定顏色）。 */
-const PROJECT_COLORS = ["#6ab4f0", "#5fbf8a", "#a57df0", "#d97bc4", "#f0d66a", "#f06a7b"];
-
 /** 專案清單（上游 projectRows.js）：長條是各工具比例的漸層，展開看各工具的 token。 */
-export function ProjectList({ rows }: { rows: ProjectRow[] }) {
+export function ProjectList({ rows, motion }: { rows: ProjectRow[]; motion?: ListMotion }) {
   const [open, setOpen] = useState<string | null>(null);
-  if (!rows.length) return empty(t("這段期間沒有專案用量"));
+  const list = useRef<HTMLUListElement>(null);
+  const colors = useVendorColors();
+  const icons = useToolIcons();
   const max = Math.max(...rows.map((r) => r.tokens), 0);
+  useListMotion(list, rows.map((p): MotionRow => ({ key: p.key, value: p.tokens, scale: barWidth(p.tokens, max) / 100 })), fmtTokens, motion);
+  if (!rows.length) return empty(t("這段期間沒有專案用量"));
   return (
-    <ul className="space-y-1.5 px-3">
+    <ul ref={list} className="relative space-y-1.5 px-3">
       {rows.map((p) => {
-        const own = stableColor(p.key, PROJECT_COLORS);
-        const color = (key: string) => (key === "__unattributed" ? own : seriesColor(key, 0));
+        // 專案自己的顏色取上游 fallbackModelColors；各工具的段落用廠商色，品牌表沒有的（含未分類）
+        // 用專案色（上游 projectRows.js 的 clientColor）。
+        const own = stableColor(p.key, FALLBACK_MODEL_COLORS);
+        const color = (key: string) => (Object.prototype.hasOwnProperty.call(colors, key) && colors[key] ? colors[key] : own);
         return (
           <Row
             key={p.key}
+            motionKey={p.key}
             title={p.label}
             titleHint={p.label}
-            leading={<span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: own }} />}
-            right={`${fmtTokens(p.tokens)} · ${fmtUsd(p.costUsd)}`}
-            bar={<Bar width={barWidth(p.tokens, max)} background={clientGradient(p.clients, color, own)} />}
+            // 圖示模式畫資料夾（上游 row-icon-project），色點模式用專案色。
+            leading={<RowMark mark={iconKindFor({}, "project", icons)} color={own} />}
+            right={<MotionRight rest={` · ${fmtUsd(p.costUsd)}`} />}
+            bar={<Bar background={clientGradient(p.clients, color, own)} />}
             expanded={open === p.key}
             onToggle={p.clients.length ? () => setOpen(open === p.key ? null : p.key) : undefined}
           >
@@ -260,28 +303,50 @@ export function ProjectList({ rows }: { rows: ProjectRow[] }) {
   );
 }
 
-function SessionLine({ s, max, now, onOpen }: { s: SessionRow; max: number; now: number; onOpen?: () => void }) {
+/** 上游 sessionRows.js：工具的廠商色，沒有就用模型的顏色，再沒有就依 session key 取固定色。 */
+function sessionColor(colors: VendorColorMap, s: SessionRow, model: string): string {
+  return colors[s.client] || (model ? modelColor(colors, model) : stableColor(s.key, FALLBACK_MODEL_COLORS));
+}
+
+function SessionLine({ s, now, onOpen }: { s: SessionRow; now: number; onOpen?: () => void }) {
   const resolve = useResolveModel();
+  const colors = useVendorColors();
   const model = sessionModelLabel(foldNames(s.models, resolve));
+  const color = sessionColor(colors, s, model);
   const title = [clientLabel(s.client), model].filter(Boolean).join(" · ");
   const sub = [s.archived ? t("已封存") : "", compactSessionTime(s.at, new Date(now)), callsLabel(s.messageCount)].filter(Boolean).join(" · ");
   const id = sessionIdLabel(s.sessionId);
   // 封存的 session 原始紀錄已經不在，不可能還在寫入（上游 sessionActivityState 同樣視為閒置）。
   const live = !s.archived && isLive(s.at, now);
+  const mark = iconKindFor({ client: s.client }, "session", useToolIcons());
   return (
     <Row
+      motionKey={s.key}
       title={title}
       titleHint={`${clientLabel(s.client)} session${id ? ` ${id}` : ""}`}
       leading={
-        <span
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${live ? "bg-success" : ""}`}
-          style={live ? undefined : { background: seriesColor(s.client, 0) }}
-          title={live ? t("10 分鐘內有活動") : undefined}
-        />
+        mark.kind === "icon" ? (
+          // 上游 session 模式的圖示 11px，進行中時在右下角疊一個帶面板底色外環的綠點（styles.css .row-live）。
+          <span className="relative inline-flex shrink-0">
+            <RowMark mark={mark} color={color} size={11} />
+            {live && (
+              <span
+                className="absolute -bottom-px -right-px h-[5px] w-[5px] rounded-full bg-success ring-[1.5px] ring-app"
+                title={t("10 分鐘內有活動")}
+              />
+            )}
+          </span>
+        ) : (
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${live ? "bg-success" : ""}`}
+            style={live ? undefined : { background: color }}
+            title={live ? t("10 分鐘內有活動") : undefined}
+          />
+        )
       }
       sub={[sub, id].filter(Boolean).join(" · ")}
-      right={`${fmtTokens(s.totalTokens)} · ${fmtUsd(s.costUsd)}`}
-      bar={<Bar width={barWidth(s.totalTokens, max)} background={seriesColor(s.client, 0)} />}
+      right={<MotionRight rest={` · ${fmtUsd(s.costUsd)}`} />}
+      bar={<Bar background={color} />}
       onClick={onOpen}
     />
   );
@@ -295,8 +360,11 @@ function SessionDetailView({ s, period, onBack }: { s: SessionRow; period: Perio
   const resolve = useResolveModel();
   const [sortBy, setSortBy] = useState<"time" | "tokens">("time");
   const [open, setOpen] = useState<string | null>(null);
+  const colors = useVendorColors();
   const detail = useFetched(() => api.sessionDetailGet(s.client, s.sessionId, period, s.costUsd), `${s.key}:${period}`);
-  const title = [clientLabel(s.client), sessionModelLabel(foldNames(s.models, resolve))].filter(Boolean).join(" · ");
+  const model = sessionModelLabel(foldNames(s.models, resolve));
+  const title = [clientLabel(s.client), model].filter(Boolean).join(" · ");
+  const color = sessionColor(colors, s, model);
   let body: ReactNode;
   if (!detail) body = empty(t("載入中…"));
   else if (!detail.found) body = empty(t("在這台機器上找不到對話紀錄。"));
@@ -323,7 +391,7 @@ function SessionDetailView({ s, period, onBack }: { s: SessionRow; period: Perio
             titleHint={r.title}
             sub={r.subtitle}
             right={`${fmtTokens(r.value)} · ${fmtUsd(r.cost)}`}
-            bar={<Bar width={barWidth(r.value, max)} background={seriesColor(s.client, 0)} />}
+            bar={<Bar scale={barWidth(r.value, max) / 100} background={color} />}
             expanded={open === r.key}
             onToggle={() => setOpen(open === r.key ? null : r.key)}
           >
@@ -362,43 +430,55 @@ function SessionDetailView({ s, period, onBack }: { s: SessionRow; period: Perio
   );
 }
 
-function ReviewLine({ g, max, now }: { g: ReviewGroup; max: number; now: number }) {
+/** session 清單裡 Codex 背景審查合成的那一列（`data-motion-key` 固定是 `__review`）。 */
+const REVIEW_KEY = "__review";
+
+function ReviewLine({ g, now }: { g: ReviewGroup; now: number }) {
+  const color = clientColor(useVendorColors(), "codex");
+  const icons = useToolIcons();
   return (
     <Row
+      motionKey={REVIEW_KEY}
       title={t("Codex 自動審查")}
-      leading={<span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: seriesColor("codex", 0) }} />}
+      leading={<RowMark mark={iconKindFor({ client: "codex" }, "session", icons)} color={color} size={11} />}
       sub={`${t("最近 {time}", { time: compactSessionTime(g.latestAt, new Date(now)) })} · ${fmtTokens(g.latestTokens)} · ${t("{count} 次背景執行", { count: g.count })}`}
-      right={`${fmtTokens(g.totalTokens)} · ${fmtUsd(g.costUsd)}`}
-      bar={<Bar width={barWidth(g.totalTokens, max)} background={seriesColor("codex", 0)} />}
+      right={<MotionRight rest={` · ${fmtUsd(g.costUsd)}`} />}
+      bar={<Bar background={color} />}
     />
   );
 }
 
 /** session 清單（上游 sessionRows.js）：最近使用的在前，一頁 100 筆；Codex 背景審查合成最後一列。 */
-export function SessionList({ period, fallback }: { period: PeriodName; fallback: ReactNode }) {
+export function SessionList({ period, fallback, motion }: { period: PeriodName; fallback: ReactNode; motion?: ListMotion }) {
   // 換期間時由呼叫端以 key={period} 重建這個元件，頁碼自然回到第一頁。
   const [page, setPage] = useState(0);
   const [openSession, setOpenSession] = useState<SessionRow | null>(null);
+  const list = useRef<HTMLUListElement>(null);
   const data: SessionPage | null = useFetched(() => api.usageSessions(period, page), `${period}:${page}`);
+  const max = data?.maxTokens ?? 0;
+  useListMotion(
+    list,
+    (openSession ? [] : (data?.rows ?? [])).map((r): MotionRow => ({ key: r.kind === "review" ? REVIEW_KEY : r.key, value: r.totalTokens, scale: barWidth(r.totalTokens, max) / 100 })),
+    fmtTokens,
+    motion,
+  );
   if (openSession) return <SessionDetailView s={openSession} period={period} onBack={() => setOpenSession(null)} />;
   if (!data) return null;
   if (!data.rows.length) return <>{fallback}</>;
   const now = Date.now();
-  const max = data.maxTokens;
   const pages = Math.ceil(data.total / data.pageSize);
   const start = data.page * data.pageSize + 1;
   const end = Math.min(data.total, start + data.rows.length - 1);
   return (
     <>
-      <ul className="space-y-1.5 px-3">
+      <ul ref={list} className="relative space-y-1.5 px-3">
         {data.rows.map((r) =>
           r.kind === "review" ? (
-            <ReviewLine key="__review" g={r} max={max} now={now} />
+            <ReviewLine key={REVIEW_KEY} g={r} now={now} />
           ) : (
             <SessionLine
               key={r.key}
               s={r}
-              max={max}
               now={now}
               // 只有讀得到逐回合紀錄的工具可以點開；封存的 session 原始紀錄已經不在（上游同樣只開這幾個）。
               onOpen={DETAIL_CLIENTS.includes(r.client) && !r.archived ? () => setOpenSession(r) : undefined}

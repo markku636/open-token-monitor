@@ -441,3 +441,9 @@ pub async fn update_download(app: AppHandle) -> UpdateState {
 pub async fn update_install(app: AppHandle) -> AppResult<()> {
     updater::install(&app).await
 }
+
+/// 「查看完整版本資訊」與「查看 release」：開生效 hub 的版本頁。不收參數，網址由 Rust 決定。
+#[tauri::command]
+pub fn update_open_release(app: AppHandle) -> AppResult<()> {
+    updater::open_release_page(&app)
+}

@@ -5,9 +5,12 @@
 
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { decodeThemeCode } from "./theme";
 
 export type WindowMode = "floating" | "normal" | "desktop" | "tray";
 export type ThemeSetting = "system" | "dark" | "light";
+/** 減少動態效果（上游 `reduceMotion`）：跟隨系統的「動畫效果」、一律減少、一律播放。 */
+export type ReduceMotionSetting = "system" | "on" | "off";
 export type ValueSource = "cli" | "env" | "settings" | "keyring" | "baked" | "none";
 export type ClientStatus = "active" | "waiting" | "missing";
 export type UploadState = "disabled" | "pending" | "ok" | "error";
@@ -40,10 +43,23 @@ export interface Settings {
   limitsRefreshMs: number;
   language: "auto" | "zh-TW" | "en";
   theme: ThemeSetting;
+  reduceMotion: ReduceMotionSetting;
+  /** 介面配色覆寫（上游 `themeColors`）：accent / bg / text / muted → 小寫 #rrggbb；{} = 內建配色。 */
+  themeColors: Record<string, string>;
+  /** 廠商色覆寫（上游 `vendorColors`）：廠商 id → 小寫 #rrggbb；{} = 品牌色。 */
+  vendorColors: Record<string, string>;
   automaticAppUpdates: boolean;
   appUpdateDismissedVersion: string;
   showLiveTokenRate: boolean;
   tokenRateMode: "speed" | "burn";
+  /** 清單前面畫工具／廠商圖示，關閉時改回色點（上游 `showToolIcons`，預設開）。 */
+  showToolIcons: boolean;
+  /** 標題旁的狀態點（上游 `showLiveDot`，預設開）。header 還沒照它呈現。 */
+  showLiveDot: boolean;
+  /** 標題只顯示 Σ（上游 `titleIconOnly`，預設開）。header 還沒照它呈現。 */
+  titleIconOnly: boolean;
+  /** 交換重新掃描與設定按鈕的位置（上游 `settingsInTitlebar`，預設關）。header 還沒照它呈現。 */
+  settingsInTitlebar: boolean;
   currency: string;
   currencyRates: Record<string, number>;
   exportAutoEnabled: boolean;
@@ -64,6 +80,22 @@ export interface Settings {
   zoomFactor: number;
   windowToggleShortcut: string;
   autostart: boolean;
+  /** 視圖的切換順序（上游 `viewDisplayOrder`）：空字串 = 預設順序。見 src-tauri/src/view_prefs.rs。 */
+  viewDisplayOrder: string;
+  /** 隱藏的視圖（上游 `hiddenViews`，預設 `status`）。 */
+  hiddenViews: string;
+  homeModuleOrder: string;
+  hiddenHomeModules: string;
+  showHomeLimitBars: boolean;
+  showHomeLimitProviderNames: boolean;
+  homeLimitProviderOrder: string;
+  hiddenHomeLimitProviders: string;
+  homeLimitAccountCount: number;
+  homeActiveDaysWindow: "all" | "year";
+  heatmapMetric: "tokens" | "cost";
+  /** 其他缺口才會移植的上游設定；還沒有時是 undefined（主頁把 showLimitUsed 當 false）。 */
+  showLimitUsed?: boolean;
+  limitProviderOrder?: string;
 }
 
 export interface SettingsView extends Settings {
@@ -77,6 +109,8 @@ export interface SettingsView extends Settings {
   buildChannel: "corp" | "dev";
   appVersion: string;
   supportedClients: string[];
+  /** 支援的額度 provider，依上游 `LIMIT_PROVIDER_CATALOG` 的順序（主頁額度與設定頁的清單）。 */
+  supportedLimitProviders: string[];
 }
 
 export type SettingsPatch = Partial<
@@ -108,10 +142,17 @@ export type SettingsPatch = Partial<
     | "autostart"
     | "language"
     | "theme"
+    | "reduceMotion"
+    | "themeColors"
+    | "vendorColors"
     | "automaticAppUpdates"
     | "appUpdateDismissedVersion"
     | "showLiveTokenRate"
     | "tokenRateMode"
+    | "showToolIcons"
+    | "showLiveDot"
+    | "titleIconOnly"
+    | "settingsInTitlebar"
     | "currency"
     | "currencyRates"
     | "exportAutoEnabled"
@@ -119,6 +160,17 @@ export type SettingsPatch = Partial<
     | "serviceStatusRefreshMs"
     | "modelAliases"
     | "modelAliasGrouping"
+    | "viewDisplayOrder"
+    | "hiddenViews"
+    | "homeModuleOrder"
+    | "hiddenHomeModules"
+    | "showHomeLimitBars"
+    | "showHomeLimitProviderNames"
+    | "homeLimitProviderOrder"
+    | "hiddenHomeLimitProviders"
+    | "homeLimitAccountCount"
+    | "homeActiveDaysWindow"
+    | "heatmapMetric"
   >
 >;
 
@@ -221,6 +273,11 @@ export interface LimitWindow {
   windowMinutes: number | null;
   currency: string | null;
   showMeter: boolean;
+  /** wire 一律帶（src-tauri/src/wire/limits.rs）；主頁的重置說明與「無限制」用。 */
+  resetDescription?: string;
+  detail?: string;
+  /** 其他 provider 移植後才會有的顯示值（上游 `window.value`）。 */
+  value?: string;
 }
 
 export interface LimitProvider {
@@ -507,9 +564,38 @@ export type RangeResult =
   | { status: "loading" }
   | { status: "disabled" };
 
-/** 全公司的範圍（src-tauri/src/gui/views.rs `CompanyRange`）。 */
+/** 全公司範圍的一台裝置（src-tauri/src/display.rs `RangeDeviceRow`）。 */
+export interface RangeDeviceRow {
+  deviceId: string;
+  hostname: string;
+  platform: string;
+  osName: string | null;
+  agentRuntime: string;
+  agentVersion: string;
+  isLocal: boolean;
+  stale: boolean;
+  ageMs: number | null;
+  /** false：這台沒有可用的每日歷史（即時數字是 0 也一樣，範圍內仍可能有用量），不計入總數。 */
+  available: boolean;
+  totalTokens: number;
+  costUsd: number;
+  topClient: string | null;
+}
+
+/**
+ * 全公司的範圍（src-tauri/src/gui/views.rs `CompanyRange`）。`devices` 是逐台的清單；`null` 表示
+ * hub 不提供逐台的每日歷史（舊的 hub），總數來自 hub 合併好的歷史。
+ */
 export type CompanyRangeResult =
-  | { status: "ready"; start: string; end: string; totals: PeriodTotals; detail: PeriodDetail; summary: RangeSummary }
+  | {
+      status: "ready";
+      start: string;
+      end: string;
+      totals: PeriodTotals;
+      detail: PeriodDetail;
+      summary: RangeSummary;
+      devices: RangeDeviceRow[] | null;
+    }
   | { status: "loading" }
   | { status: "error"; message: string };
 
@@ -573,6 +659,8 @@ export const api = {
   updateCheck: () => invoke<UpdateState>("update_check"),
   updateDownload: () => invoke<UpdateState>("update_download"),
   updateInstall: () => invoke<void>("update_install"),
+  /** 用系統瀏覽器開生效 hub 的版本頁（`/downloads/releases#v<版本>`）；網址由 Rust 決定。 */
+  updateOpenRelease: () => invoke<void>("update_open_release"),
   usageDetail: (period: PeriodName) => invoke<PeriodDetail | null>("usage_detail", { period }),
   sessionDetailGet: (client: string, sessionId: string, period: PeriodName, sessionCost: number) =>
     invoke<SessionDetail>("session_detail_get", { client, sessionId, period, sessionCost }),
@@ -589,6 +677,8 @@ export const api = {
   companyRangeGet: (range: RangeName, weekStart: number) =>
     invoke<CompanyRangeResult>("company_range_get", { range, weekStart }),
   companyDevice: (deviceId: string, period: PeriodName) => invoke<DeviceDetail | null>("company_device", { deviceId, period }),
+  companyRangeDevice: (deviceId: string, range: RangeName, weekStart: number) =>
+    invoke<DeviceDetail | null>("company_range_device", { deviceId, range, weekStart }),
 };
 
 function on<T>(name: string) {
@@ -605,7 +695,10 @@ export const onUpdateState = on<UpdateState>("update-state");
 export const onCompanyUpdated = on<CompanyStats>("company-updated");
 export const onLimitsUpdated = on<LimitsView>("limits-updated");
 export const onCurrencyUpdated = on<CurrencyView>("currency-updated");
-/** tray 選單的「開啟 ▸ 本機／全公司／額度」。 */
+/**
+ * tray 選單的「開啟 ▸ …」與邊緣額度條：視圖 id（home、tool、status、device、limits、trends），
+ * 或舊的分頁 id（local、company、limits、trends，viewPrefs.ts `LEGACY_VIEW` 換成視圖）。
+ */
 export const onOpenTab = on<string>("open-tab");
 /** Copilot device flow（src-tauri/src/gui/commands.rs `copilot_login_start`）。 */
 export interface CopilotDeviceCode {
@@ -709,8 +802,9 @@ function mockCompany(now: string): CompanyStats {
     return {
       deviceId: `dev-${i}`,
       hostname,
-      platform: "win32-x64",
-      osName: "Windows 11",
+      // 幾台不是 Windows，截圖看得到各系統的圖示。
+      platform: ["win32-x64", "win32-x64", "darwin-arm64", "win32-x64", "linux-x64", "win32-x64"][i],
+      osName: ["Windows 11", "Windows 11", "macOS", "Windows 11", "Ubuntu", "Windows 11"][i],
       agentRuntime: i === 3 ? "electron-widget" : "tauri-widget",
       agentVersion: i === 3 ? "0.61.0-corp.1" : "0.1.0",
       isLocal: i === 0,
@@ -826,7 +920,14 @@ function mockTrends(today: string): TrendsView {
   };
 }
 
+/** 瀏覽器預覽裡改過的設定（settings_update 累積），讓連續幾次修改（例如主畫面的排序）不會互相蓋掉。 */
+const mockPatch: Partial<SettingsView> = {};
+
 function mock(cmd: string, args?: Record<string, unknown>): unknown {
+  const query = new URLSearchParams(location.search);
+  // 截圖用：`?themeCode=TM1-…` 套一組介面配色、`?theme=light` 切色彩模式。
+  const themeCode = decodeThemeCode(query.get("themeCode"));
+  const theme = query.get("theme");
   const settings: SettingsView = {
     version: 1,
     deviceId: "preview-device",
@@ -848,11 +949,20 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     limitProviders: ["claude", "codex"],
     limitsRefreshMs: 300_000,
     language: "auto",
-    theme: "system",
+    theme: theme === "light" || theme === "dark" ? theme : "system",
+    themeColors: themeCode.ok ? themeCode.colors : {},
+    vendorColors: {},
+    // 截圖用：`?reduceMotion=on`／`off` 看三種狀態。
+    reduceMotion: (["system", "on", "off"] as const).find((v) => v === query.get("reduceMotion")) ?? "system",
     automaticAppUpdates: true,
     appUpdateDismissedVersion: "",
     showLiveTokenRate: true,
     tokenRateMode: "speed",
+    // 截圖用：`?toolIcons=0` 看關閉工具圖示（色點）的樣子。
+    showToolIcons: query.get("toolIcons") !== "0",
+    showLiveDot: true,
+    titleIconOnly: true,
+    settingsInTitlebar: false,
     currency: new URLSearchParams(location.search).get("currency") ?? "USD",
     currencyRates: {},
     exportAutoEnabled: true,
@@ -873,17 +983,32 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     zoomFactor: 1,
     windowToggleShortcut: "CommandOrControl+Shift+T",
     autostart: true,
+    // 截圖用：`?hiddenViews=`、`?hiddenHomeModules=`、`?viewDisplayOrder=`、`?showHomeLimitBars=1`。
+    viewDisplayOrder: query.get("viewDisplayOrder") ?? "",
+    hiddenViews: query.get("hiddenViews") ?? "status",
+    homeModuleOrder: query.get("homeModuleOrder") ?? "limits,tool,device,model,trends",
+    hiddenHomeModules: query.get("hiddenHomeModules") ?? "tool,device",
+    showHomeLimitBars: query.get("showHomeLimitBars") === "1",
+    showHomeLimitProviderNames: false,
+    homeLimitProviderOrder: "",
+    hiddenHomeLimitProviders: "",
+    homeLimitAccountCount: 3,
+    homeActiveDaysWindow: query.get("homeActiveDaysWindow") === "year" ? "year" : "all",
+    heatmapMetric: query.get("heatmapMetric") === "tokens" ? "tokens" : "cost",
     hub: { url: "https://tokens.example.internal", urlSource: "baked", secretMasked: "••••ab12", secretSource: "baked", bakedUrl: "https://tokens.example.internal" },
     buildChannel: "dev",
     appVersion: __APP_VERSION__,
     supportedClients: ["claude", "codex", "opencode", "hermes", "cursor", "antigravity", "copilot"],
+    supportedLimitProviders: ["claude", "codex", "cursor", "copilot"],
   };
   const now = new Date().toISOString();
   switch (cmd) {
     case "settings_get":
-      return settings;
+      return { ...settings, ...mockPatch };
     case "settings_update":
-      return { ...settings, ...(args?.patch as object) };
+      // 預覽時連續改好幾個設定（例如主畫面的排序）要累積起來，不然下一次修改會蓋回預設值。
+      Object.assign(mockPatch, args?.patch as object);
+      return { ...settings, ...mockPatch };
     case "stats_get":
       return {
         deviceId: "preview-device",
@@ -961,8 +1086,31 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
         ],
       } satisfies DeviceDetail;
     case "company_range_get": {
-      const totals = { ...mockPeriod(6 * (args?.range === "last30" ? 12 : args?.range === "last7" ? 4 : 2)), sessionCount: 0 };
+      const scale = 6 * (args?.range === "last30" ? 12 : args?.range === "last7" ? 4 : 2);
+      const totals = { ...mockPeriod(scale), sessionCount: 0 };
       const detail = mockDetail(1);
+      // 截圖用：`?rangeDevices=none` 假裝是沒有逐台每日歷史的舊 hub。
+      const oldHub = new URLSearchParams(location.search).get("rangeDevices") === "none";
+      const devices: RangeDeviceRow[] = mockCompany(now)
+        .devices.slice(0, 5)
+        .map((d, i) => {
+          const share = [0.36, 0.27, 0.22, 0.15, 0][i];
+          return {
+            deviceId: d.deviceId,
+            hostname: d.hostname,
+            platform: d.platform,
+            osName: d.osName,
+            agentRuntime: d.agentRuntime,
+            agentVersion: d.agentVersion,
+            isLocal: d.isLocal,
+            stale: d.stale,
+            ageMs: d.ageMs,
+            available: i < 4,
+            totalTokens: Math.round(totals.totalTokens * share),
+            costUsd: totals.costUsd * share,
+            topClient: i < 4 ? d.topClient : null,
+          };
+        });
       return {
         status: "ready",
         start: new Date(Date.now() - 6 * 86_400_000).toISOString().slice(0, 10),
@@ -970,8 +1118,27 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
         totals,
         detail: { ...detail, projects: [], sessionCount: 0 },
         summary: { activeDays: 5, currentStreak: 3, activeTimeMs: 0, peakDayTokens: 0 },
+        devices: oldHub ? null : devices,
       } satisfies CompanyRangeResult;
     }
+    case "company_range_device":
+      // 推出的範圍沒有工具 → 模型的拆分（上游 derivePeriod），所以工具底下沒有模型。
+      return {
+        deviceId: String(args?.deviceId ?? ""),
+        platform: "win32-x64",
+        osName: "Windows 11",
+        osVersion: "10.0.26200",
+        agentRuntime: "tauri-widget",
+        agentVersion: "0.1.0",
+        receivedAt: new Date(Date.now() - 180_000).toISOString(),
+        isLocal: false,
+        totalTokens: 212_000_000,
+        tools: [
+          { key: "claude", tokens: 160_000_000, percent: 75.5, models: [] },
+          { key: "codex", tokens: 40_000_000, percent: 18.9, models: [] },
+          { key: "__unattributed", tokens: 12_000_000, percent: 5.6, models: [] },
+        ],
+      } satisfies DeviceDetail;
     case "range_get": {
       const days = args?.range === "last30" ? 30 : args?.range === "last7" ? 7 : 4;
       const detail = mockDetail(days / 2);
@@ -994,7 +1161,8 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
         models: i % 3 ? { "claude-fable-5-1": Math.round(d.tokens * 0.7), "gpt-5.5": d.tokens - Math.round(d.tokens * 0.7) } : { "claude-haiku-4-5": d.tokens },
       })) satisfies SeriesDay[];
     case "trends_get":
-      return mockTrends(now.slice(0, 10));
+      // `?trendsPending=1`：trends_get 一直不回來，截圖看主頁活動模組先畫 30 天預覽。
+      return query.get("trendsPending") === "1" ? new Promise(() => {}) : mockTrends(now.slice(0, 10));
     case "session_detail_get": {
       const t = (i: number, o: number, cr: number, cw: number, r = 0): DetailTokens => ({ input: i, output: o, cacheRead: cr, cacheWrite: cw, reasoning: r, total: i + o + cr + cw });
       const at = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
@@ -1018,13 +1186,19 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     }
     case "usage_sessions":
       return mockSessions(Number(args?.page ?? 0));
+    case "update_open_release":
+      return null;
     case "update_state":
     case "update_check":
-    case "update_download":
-      // 截圖用：`?mockUpdate=1` 假裝有新版與版本說明。
-      if (new URLSearchParams(location.search).get("mockUpdate")) {
+    case "update_download": {
+      // 截圖用：`?mockUpdate=1` 假裝有新版與版本說明；`=ready` 已下載、`=error` 檢查失敗。
+      const mockUpdate = new URLSearchParams(location.search).get("mockUpdate");
+      if (mockUpdate === "error") {
+        return { state: "error", message: "檢查更新失敗：timeout", retryAt: null } satisfies UpdateState;
+      }
+      if (mockUpdate) {
         return {
-          state: "available",
+          state: mockUpdate === "ready" ? "ready" : "available",
           version: "0.2.0",
           date: now,
           notes: [
@@ -1037,6 +1211,7 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
         } satisfies UpdateState;
       }
       return { state: "disabled", reason: "devBuild" } satisfies UpdateState;
+    }
     default:
       return null;
   }

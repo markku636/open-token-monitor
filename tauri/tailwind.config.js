@@ -12,6 +12,8 @@ export default {
         elevated: "rgb(var(--c-elevated) / <alpha-value>)",
         inset: "rgb(var(--c-inset) / <alpha-value>)",
         fg: "rgb(var(--c-fg) / <alpha-value>)",
+        // 次要文字（上游 --muted，主題代碼的第四色）。
+        muted: "rgb(var(--c-muted) / <alpha-value>)",
         accent: "rgb(var(--c-accent) / <alpha-value>)",
         success: "rgb(var(--c-success) / <alpha-value>)",
         warning: "rgb(var(--c-warning) / <alpha-value>)",

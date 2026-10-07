@@ -8,9 +8,9 @@ import {
   type AppStatus,
   type Diagnostics,
   type LocalStats,
+  type ReduceMotionSetting,
   type SettingsView,
   type SyncReport,
-  type ThemeSetting,
   type WindowMode,
 } from "./api";
 import type { LangSetting } from "./i18n";
@@ -21,9 +21,11 @@ import { t } from "./i18n";
 import { Button, Field, Section, Segmented, Select, Toggle } from "./ui";
 import { updateStatusText } from "./update";
 import { providerName } from "./limits";
+import { AppearanceSection } from "./SettingsAppearance";
 import { DisplaySection } from "./SettingsDisplay";
+import { ViewsSection } from "./SettingsViews";
 import { ExportSection } from "./SettingsExport";
-import { notesOf, ReleaseNotes } from "./UpdatePill";
+import { notesOf, ReleaseNotes, ViewReleaseLink } from "./UpdatePill";
 import { formatShortcut, shortcutFromEvent } from "./shortcut";
 import { normalizeOwnerEmail } from "./ownerEmail";
 
@@ -215,9 +217,25 @@ function UpdateSection({ s }: { s: SettingsView }) {
             <div className="mt-1.5">
               <ReleaseNotes groups={notes} />
             </div>
+            {s.hub.url && (
+              <div className="mt-1.5">
+                <ViewReleaseLink onClick={() => void run(api.updateOpenRelease)} />
+              </div>
+            )}
           </details>
         )}
-        {!disabled && <div className="flex gap-2">{action}</div>}
+        {!disabled && (
+          <div className="flex gap-2">
+            {action}
+            {/* 上游在無法安裝時把 action 換成「View release」。Tauri 沒有那兩種狀態，但檢查、下載或安裝失敗時
+                仍需要一條手動路線：開 hub 的版本頁（錯誤狀態沒有版本號，所以不帶錨點），頁面上有下載連結。 */}
+            {update?.state === "error" && s.hub.url && (
+              <Button disabled={busy} onClick={() => void run(api.updateOpenRelease)}>
+                {t("查看 release")}
+              </Button>
+            )}
+          </div>
+        )}
         {message && <p className="text-xs text-danger">{message}</p>}
       </div>
     </Section>
@@ -501,17 +519,6 @@ export default function Settings() {
               </div>
             </Field>
           )}
-          <Field label={t("主題")}>
-            <Segmented<ThemeSetting>
-              value={s.theme}
-              options={[
-                { value: "system", label: t("跟隨系統") },
-                { value: "dark", label: t("深色") },
-                { value: "light", label: t("淺色") },
-              ]}
-              onChange={(v) => void updateSettings({ theme: v })}
-            />
-          </Field>
           <Field label={t("語言")}>
             <Segmented<LangSetting>
               value={s.language}
@@ -557,8 +564,22 @@ export default function Settings() {
               onChange={(e) => void updateSettings({ opacity: Number(e.target.value) })}
             />
           </Field>
+          {/* 上游 Appearance 的 Reduce Motion；「系統」沿用主題那一列的「跟隨系統」。 */}
+          <Field label={t("減少動態效果")} hint={t("減少動畫，或跟隨系統設定。")}>
+            <Segmented<ReduceMotionSetting>
+              value={s.reduceMotion}
+              options={[
+                { value: "system", label: t("跟隨系統") },
+                { value: "on", label: t("開啟") },
+                { value: "off", label: t("關閉") },
+              ]}
+              onChange={(v) => void updateSettings({ reduceMotion: v })}
+            />
+          </Field>
         </Section>
 
+        <ViewsSection s={s} />
+        <AppearanceSection s={s} />
         <DisplaySection s={s} />
         <ExportSection s={s} />
 

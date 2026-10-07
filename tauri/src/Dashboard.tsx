@@ -1,10 +1,13 @@
 // 用量儀表板（上游 dashboard.html 的視窗）：比 widget 大的獨立視窗，上方是今日／本月／全部的摘要，
 // 接著是全期間的 8 張活動卡（上游 dashboard 活動分頁的 dashCards），
-// 下面左邊是趨勢（熱力圖、趨勢線與活躍統計，與 widget 的趨勢分頁同一個元件），右邊是依工具與模型的拆分。
+// 下面左邊是趨勢（熱力圖與趨勢線是主頁活動模組的元件，期間長條與活躍統計是 widget 的趨勢視圖），
+// 右邊是依工具與模型的拆分。動畫用儀表板的版本（上游 dashboard.js：熱力圖等視窗有焦點才淡入、
+// 拆分的長條 800 ms），摘要與活動卡不動（上游相同）。
 // 由 tray 選單或 widget 標題列開啟（src-tauri/src/gui/window.rs `open_dashboard`）。
 
 import { useEffect } from "react";
 import { api, type PeriodName } from "./api";
+import { ActivityBody } from "./Activity";
 import { BreakdownList } from "./Breakdown";
 import { fmtTokens, fmtUsd } from "./format";
 import { t } from "./i18n";
@@ -50,6 +53,18 @@ function ActivityCards() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** 熱力圖與趨勢線（主頁活動模組的內容，儀表板的進場動畫）。 */
+function DashboardActivity() {
+  const view = useFetched(() => api.trendsGet(), "trends");
+  const metric = useApp((s) => s.settings?.heatmapMetric ?? "cost");
+  if (!view || !view.daily.some((d) => d.tokens > 0)) return null;
+  return (
+    <div className="px-3 pb-3">
+      <ActivityBody view={view} metric={metric} variant="dashboard" />
     </div>
   );
 }
@@ -107,7 +122,10 @@ export function Dashboard() {
           <section className="rounded-sm bg-inset py-2">
             <h2 className="px-3 pb-1 text-sm font-medium">{t("趨勢")}</h2>
             {historyEnabled ? (
-              <TrendsPanel period={slot} />
+              <>
+                <DashboardActivity />
+                <TrendsPanel period={slot} variant="dashboard" />
+              </>
             ) : (
               <div className="px-3 py-6 text-center text-xs text-fg/45">{t("每日歷史已關閉，沒有趨勢資料")}</div>
             )}
@@ -115,11 +133,12 @@ export function Dashboard() {
           <div className="space-y-4">
             <section className="rounded-sm bg-inset py-2">
               <h2 className="px-3 pb-2 text-sm font-medium">{t("工具")}</h2>
-              {p && <BreakdownList p={p} by="client" limit={10} />}
+              {/* 上游的儀表板視窗沒有品牌圖示（只有 widget 清單有），維持色塊與長條。 */}
+              {p && <BreakdownList p={p} by="client" limit={10} variant="dashboard" lift marks={false} motion={{ surface: "dashboard-tools", periodKey: slot, viewKey: "client" }} />}
             </section>
             <section className="rounded-sm bg-inset py-2">
               <h2 className="px-3 pb-2 text-sm font-medium">{t("模型")}</h2>
-              {p && <BreakdownList p={p} by="model" limit={10} />}
+              {p && <BreakdownList p={p} by="model" limit={10} variant="dashboard" lift marks={false} motion={{ surface: "dashboard-models", periodKey: slot, viewKey: "model" }} />}
             </section>
           </div>
         </div>

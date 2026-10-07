@@ -179,6 +179,23 @@ test("history reaches the hub: /api/history and persisted history rows", { skip 
     assert.equal(day.tokens, 1115);
     assert.equal(day.perClient.claude.messages, 4);
 
+    // 全公司範圍逐台計算用的每日歷史（hub 的 /api/custom/device-daily；overlay 沒有 hub/deviceDaily.js 就略過）。
+    if (fs.existsSync(path.join(CUSTOM, "hub", "deviceDaily.js"))) {
+      const dailyRes = await fetch(`${hub.base}/api/custom/device-daily`, { headers: bearer("client-e2e-key") });
+      assert.equal(dailyRes.status, 200);
+      const payload = await dailyRes.json();
+      const mine = payload.devices.find((d) => d.deviceId === "e2e-history");
+      assert.ok(mine, "our device is listed");
+      assert.equal(mine.historyAvailable, true);
+      assert.equal(mine.historyHasUsage, true);
+      assert.ok(mine.daily.length > 0 && mine.daily.every((r) => r.date >= payload.windowStart), "rows start at windowStart");
+      assert.ok(!mine.daily.some((r) => r.date === dayBefore(todayKey, 40)), "the 40-day-old row is outside the window");
+      const projected = mine.daily.find((d) => d.date === yesterday);
+      assert.equal(projected.tokens, 1115);
+      assert.equal(projected.perClient.claude.tokens, 1115);
+      assert.equal(projected.perClient.claude.messages, undefined, "only the displayed figures travel");
+    }
+
     const [persisted] = await hub.overlay.persistence.store.query(
       "SELECT tokens, source FROM device_daily_usage WHERE device_id = $1 AND usage_date = $2",
       ["e2e-history", yesterday],

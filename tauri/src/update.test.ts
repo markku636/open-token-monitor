@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { updatePillVisible, updateStatusText } from "./update";
+import { pillClickAction, updatePillVisible, updateStatusText } from "./update";
 
 describe("update status", () => {
   it("explains why updates are off", () => {
@@ -30,5 +30,21 @@ describe("update status", () => {
   it("keeps the error and when it retries", () => {
     const text = updateStatusText({ state: "error", message: "檢查更新失敗：timeout", retryAt: null });
     expect(text).toBe("檢查更新失敗：timeout");
+  });
+
+  it("never installs from the version label, like upstream", () => {
+    const ready = { state: "ready", version: "0.2.0", notes: null, date: null } as const;
+    const available = { state: "available", version: "0.2.0", notes: null, date: null } as const;
+    const downloading = { state: "downloading", version: "0.2.0", received: 0, total: null } as const;
+    // 有版本說明時一律開 popover。
+    for (const u of [ready, available, downloading]) {
+      expect(pillClickAction(u, true, true)).toBe("popover");
+      expect(pillClickAction(u, true, false)).toBe("popover");
+    }
+    // 已下載、沒有說明：開版本頁（安裝只走「重新啟動」）；沒有 hub 就沒有版本頁，不能按。
+    expect(pillClickAction(ready, false, true)).toBe("release");
+    expect(pillClickAction(ready, false, false)).toBe("none");
+    expect(pillClickAction(available, false, false)).toBe("download");
+    expect(pillClickAction(downloading, false, true)).toBe("none");
   });
 });

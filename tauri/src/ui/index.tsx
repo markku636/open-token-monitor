@@ -85,10 +85,13 @@ export function Toggle({ checked, onChange, disabled }: { checked: boolean; onCh
         checked ? "bg-accent" : "bg-fg/20",
       )}
     >
+      {/* 開啟時圓鈕用面板色（上游 styles.css 的 switch :checked::before）：強調色可自訂，淺色的強調色
+          （預設的薄荷綠、黑曜的淺灰）上放白色圓鈕會看不見。left-0 固定起點：button 會把內容置中，
+          不指定時圓鈕從中間開始位移，開啟時整個跑出軌道外。 */}
       <span
         className={cx(
-          "absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform",
-          checked ? "translate-x-4" : "translate-x-0.5",
+          "absolute left-0 top-0.5 h-4 w-4 rounded-full transition-transform",
+          checked ? "translate-x-4 bg-panel" : "translate-x-0.5 bg-white",
         )}
       />
     </button>

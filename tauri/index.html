@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Token Monitor</title>
     <script>
-      // React 掛載前先套用介面語言、主題與視圖（widget / settings），避免首幀跳動。
-      // 判準與 i18n.ts 的 resolveLang、store.ts 的 applyTheme 一致。
+      // React 掛載前先套用介面語言、主題、減少動態效果與視圖（widget / settings），避免首幀跳動。
+      // 判準與 i18n.ts 的 resolveLang、store.ts 的 applyTheme、motionRuntime.ts 的 applyReduceMotion 一致。
       (function () {
         try {
           var lang = localStorage.getItem("tm:lang");
@@ -14,9 +14,24 @@
           document.documentElement.lang = en ? "en" : "zh-Hant";
         } catch (e) {}
         try {
+          // tm:themeVars 是上次套用的介面配色（store.ts applyTheme 寫入）：light 為 true / false 時
+          // 由自訂背景決定明暗，null 時看色彩模式；vars 是要設的 --c-* 色票。
           var theme = localStorage.getItem("tm:theme") || "system";
-          var light = theme === "light" || (theme !== "dark" && matchMedia("(prefers-color-scheme: light)").matches);
+          var tv = JSON.parse(localStorage.getItem("tm:themeVars") || "null");
+          var light =
+            tv && typeof tv.light === "boolean"
+              ? tv.light
+              : theme === "light" || (theme !== "dark" && matchMedia("(prefers-color-scheme: light)").matches);
           if (light) document.documentElement.classList.add("light");
+          if (tv && tv.vars) {
+            for (var k in tv.vars) {
+              if (/^--c-/.test(k) && tv.vars[k]) document.documentElement.style.setProperty(k, tv.vars[k]);
+            }
+          }
+        } catch (e) {}
+        try {
+          var rm = localStorage.getItem("tm:reduceMotion");
+          if (rm === "system" || rm === "on" || rm === "off") document.documentElement.dataset.reduceMotion = rm;
         } catch (e) {}
         try {
           var view = new URLSearchParams(location.search).get("view");
