@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  overlay:
+    name: hub overlay (npm run verify)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # check:upstream compares upstream/ with the latest subtree squash commit.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+
+  tauri-frontend:
+    name: tauri frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tauri/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:scripts
+      - run: npm run check:secrets
+
+  tauri-core:
+    name: tauri core (Rust)
+    runs-on: ubuntu-latest
+    container: rust:1.85
+    defaults:
+      run:
+        working-directory: tauri
+    env:
+      TOKEN_MONITOR_DISABLE_KEYRING: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tauri/src-tauri
+      - run: rustup component add clippy rustfmt
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib --bins
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features --all-targets -- -D warnings
+      - name: rustls and ring only (no aws-lc, no OpenSSL)
+        run: |
+          ! cargo tree --manifest-path src-tauri/Cargo.toml --no-default-features -i aws-lc-sys 2>/dev/null | grep -q aws-lc-sys
+          ! cargo tree --manifest-path src-tauri/Cargo.toml --no-default-features -i openssl-sys 2>/dev/null | grep -q openssl-sys
+
+  compat:
+    name: tauri ↔ upstream compat
+    runs-on: ubuntu-latest
+    env:
+      TOKEN_MONITOR_DISABLE_KEYRING: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            tauri/package-lock.json
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tauri/src-tauri
+      # The hub end-to-end test runs the overlay hub from the repository root.
+      - run: npm ci
+      - run: npm ci
+        working-directory: tauri
+      - run: npm --prefix tauri run test:compat

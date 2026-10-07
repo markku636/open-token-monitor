@@ -1,0 +1,122 @@
+name: Upstream watch
+
+# Looks for a newer release of upstream token-monitor every Monday. When there
+# is one, it pulls the next release (one at a time) into upstream/ on a branch
+# upstream/<tag>, runs the overlay's verify and the Rust client's compat tests,
+# and opens a pull request
+# whose body is the impact checklist (scripts/upstream-impact.js). Finish it
+# locally with the upstream-update skill, or comment `@claude` on the PR
+# (.github/workflows/claude.yml). AGENTS.md, "升級上游", has the steps.
+#
+# Needs Settings → Actions → General → "Allow GitHub Actions to create and
+# approve pull requests". Pull requests opened with GITHUB_TOKEN do not start
+# other workflows, so CI runs once someone pushes to the branch.
+
+on:
+  schedule:
+    - cron: '17 1 * * 1'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Upstream tag (vX.Y.Z), next or latest (latest may skip releases)
+        default: next
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-watch
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    env:
+      TOKEN_MONITOR_DISABLE_KEYRING: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Compare with upstream
+        id: status
+        env:
+          REQUESTED: ${{ inputs.tag || 'next' }}
+        run: |
+          node scripts/upstream-status.js --json > "$RUNNER_TEMP/status.json"
+          cat "$RUNNER_TEMP/status.json"
+          current=$(jq -r '.current.tag' "$RUNNER_TEMP/status.json")
+          case "$REQUESTED" in
+            next) tag=$(jq -r '.pending[0] // .current.tag' "$RUNNER_TEMP/status.json") ;;
+            latest) tag=$(jq -r '.latest.tag' "$RUNNER_TEMP/status.json") ;;
+            *) tag="$REQUESTED" ;;
+          esac
+          # Only "next" goes one release at a time; anything else may skip some.
+          if [ "$tag" = "$(jq -r '.pending[0] // empty' "$RUNNER_TEMP/status.json")" ]; then skip=''; else skip='--allow-skip'; fi
+          if [ "$tag" = "$current" ]; then
+            echo "upstream/ is already $tag."
+            echo "pull=false" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --heads origin "upstream/$tag" > /dev/null; then
+            echo "Branch upstream/$tag exists already: its pull request is open or was handled."
+            echo "pull=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "pull=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+
+      - name: Pull upstream
+        id: update
+        if: steps.status.outputs.pull == 'true'
+        env:
+          TAG: ${{ steps.status.outputs.tag }}
+          SKIP: ${{ steps.status.outputs.skip }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "upstream/$TAG"
+          set +e
+          npm run upstream:update -- "$TAG" $SKIP
+          code=$?
+          set -e
+          if [ "$code" -eq 1 ]; then exit 1; fi
+          if [ "$code" -eq 0 ]; then echo "verify=passed" >> "$GITHUB_OUTPUT"; else echo "verify=failed" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: dtolnay/rust-toolchain@1.85
+        if: steps.status.outputs.pull == 'true'
+      - name: Rust client compat
+        id: compat
+        if: steps.status.outputs.pull == 'true'
+        run: |
+          npm ci --prefix tauri
+          if npm --prefix tauri run test:compat; then echo "result=passed" >> "$GITHUB_OUTPUT"; else echo "result=failed" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Open the pull request
+        if: steps.status.outputs.pull == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.status.outputs.tag }}
+          CURRENT: ${{ steps.status.outputs.current }}
+          VERIFY: ${{ steps.update.outputs.verify }}
+          COMPAT: ${{ steps.compat.outputs.result }}
+        run: |
+          git push origin "upstream/$TAG"
+          {
+            echo "Automated pull of upstream **$TAG** (was $CURRENT)."
+            echo
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| \`npm run verify\` (hub overlay) | $VERIFY |"
+            echo "| \`npm --prefix tauri run test:compat\` (Rust client) | $COMPAT |"
+            echo
+            echo "To finish: comment \`@claude finish this upstream update with the upstream-update skill\`, or run \`/upstream-update $TAG\` in Claude Code on this branch. Steps: AGENTS.md, 升級上游."
+            echo
+            head -c 55000 tmp/upstream-impact.md
+          } > "$RUNNER_TEMP/body.md"
+          gh pr create --base main --head "upstream/$TAG" --title "chore(upstream): update upstream to $TAG" --body-file "$RUNNER_TEMP/body.md"
