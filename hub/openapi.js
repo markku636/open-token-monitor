@@ -333,7 +333,7 @@ const PATHS = {
       param('compareFrom', 'compare=custom: first day of the comparison window. It must end by today and share no day with the focus.', { type: 'string', format: 'date' }),
       param('compareTo', 'compare=custom: last day of the comparison window.', { type: 'string', format: 'date' }),
       param('unitId', 'The scope: this unit and everything under it. Every company by default.'),
-      param('level', 'The level of the units to compare, below the scope. Default: the first level below it with a unit.', { type: 'string', enum: LEVELS }),
+      param('level', 'The level of the units to compare, below the scope. Default: company or department, the first below it with a unit; bu and team only when asked for.', { type: 'string', enum: LEVELS }),
       param('employeeId', 'One person\'s view: their usage wherever it was charged. unitId and level are then ignored.'),
       param('client', 'Only this tool, e.g. claude or codex.')
     ],

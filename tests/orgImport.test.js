@@ -196,6 +196,11 @@ for (const backend of BACKENDS) {
       // The history, and the lists an admin browses.
       const history = (await call(hub.base, '/api/admin/org/imports?company=ACME')).body;
       assert.deepEqual(history.history.map((h) => [h.fileDate, h.effectiveFrom, h.summary.changes.joined]), [['2026-09-01', '2026-09-01', 1], ['2026-08-01', '2026-08-01', 5]]);
+      // Each new or deactivated unit's level is kept, for the dashboard to count
+      // only the companies and departments it shows.
+      const first = history.history[1].summary;
+      assert.ok(first.unitIds.unitsAdded.length > 0);
+      assert.ok(first.unitIds.unitsAdded.every((id) => ['company', 'bu', 'department', 'team'].includes(first.unitLevels[id])), JSON.stringify(first.unitLevels));
       assert.deepEqual(history.imports.map((i) => [i.company, i.employees, i.overdue, i.last.fileName]), [['ACME', 5, false, 'ACME Announcement 20260901.xlsx']]);
       const units = new Map((await call(hub.base, '/api/admin/org/units')).body.units.map((u) => [u.id, u]));
       assert.deepEqual([units.get('ACME').headcount, units.get('ACME/-/GM Office').headcount, units.get('ACME/Games/Aurora').headcount], [5, 3, 2]);

@@ -167,7 +167,9 @@ for (const backend of BACKENDS) test(`${backend.name}: analytics:read opens the 
     assert.deepEqual(a.scope, { unitId: 'CO', name: 'CO', level: 'company', path: 'CO' });
     assert.deepEqual([a.focusTotals.tokens, a.comparisonTotals.tokens], [300, 100], 'laptop-2 is in no unit of CO');
     assert.deepEqual(a.trend, [{ period: '2026-09-14', tokens: 300, costUsd: 3, devices: 1, employees: 2 }]);
-    assert.deepEqual(a.units.map((u) => [u.unitId, u.path, u.focus.tokens, u.comparison.tokens]), [['RND', 'CO/研發部', 200, 0], ['SALES', 'CO/Business One/業務部', 100, 100]]);
+    // The analysis names units as the dashboard shows them, company and
+    // department; the org tree above keeps the BU.
+    assert.deepEqual(a.units.map((u) => [u.unitId, u.path, u.focus.tokens, u.comparison.tokens]), [['RND', 'CO/研發部', 200, 0], ['SALES', 'CO/業務部', 100, 100]]);
     assert.deepEqual(a.units[0].clients, [{ client: 'claude', focus: { tokens: 200, costUsd: 2 }, comparison: { tokens: 0, costUsd: 0 } }]);
     assert.deepEqual(a.models.map((m) => [m.model, m.focus.tokens, m.comparison.tokens, m.trend]), [['claude-sonnet-4-5', 300, 100, [{ period: '2026-09-14', tokens: 300, costUsd: 3 }]]]);
     assert.equal(a.composition.cacheRead, 180);

@@ -1,7 +1,7 @@
 'use strict';
 
 // Company org charts, and which employee each device belongs to: what the
-// dashboard's company → BU → department → team filters and comparisons, and the
+// dashboard's company → department filters and comparisons, and the
 // reports by unit, are built on.
 //
 // Import. One HR announcement workbook per company (.xlsx) is that company's
@@ -697,6 +697,8 @@ function createOrg({ store, hub, onChange = () => {}, logger = console, now = ()
         changes: Object.fromEntries(CHANGE_KINDS.map((kind) => [kind, diff[kind].length])),
         employeeIds: Object.fromEntries(EMPLOYEE_CHANGE_KINDS.map((kind) => [kind, diff[kind].map((entry) => entry.employeeId)])),
         unitIds: { unitsAdded: diff.unitsAdded.map((unit) => unit.id), unitsDeactivated: diff.unitsDeactivated.map((unit) => unit.id) },
+        // Each of those units' level, so the dashboard can count the ones it shows.
+        unitLevels: Object.fromEntries([...diff.unitsAdded, ...diff.unitsDeactivated].map((unit) => [unit.id, unit.level])),
         rulesDropped,
         rulesKept
       };

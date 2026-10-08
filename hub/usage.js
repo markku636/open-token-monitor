@@ -129,7 +129,7 @@ const { upstream } = require('../upstream');
 const { limitProviderForClient } = require(upstream('src/shared/limits/providers'));
 const { COST_BASIS, OWNER_ON_DAY, ownerOnFixedDay, parameters } = require('./reports');
 const { GRANULARITIES, addDays, bucketsFor, compareWindow, daysBetween, lastBucket, mergeSpans, overlaps, periodOf, validDay, windowBefore, yearAgoWindow } = require('./periods');
-const { LEVELS, levelIndex, unitTree } = require('./units');
+const { LEVELS, SHOWN_LEVELS, levelIndex, unitTree } = require('./units');
 
 const MAX_RANGE_DAYS = 400;
 // Past this a statement is cancelled by PostgreSQL (57014) and the answer is
@@ -393,9 +393,10 @@ function scopeFilter(p, employee, { scopeIds, domainDevices, outside, unowned })
   return sql;
 }
 
-// The levels units can be compared at under the scope: those with an active
-// unit below it, and those in-range usage was charged to (a team HR retired
-// since). Worked out ahead of the fold, which compares units of the level
+// The levels units can be compared at under the scope: of the shown levels
+// (company and department), those with an active unit below it, and those
+// in-range usage was charged to (a department HR retired since). A level
+// that is not shown can still be asked for. Worked out ahead of the fold, which compares units of the level
 // picked here.
 function levelsFor(asked, ctx, plan, daily) {
   const { tree, scope, person, other, unowned } = ctx;
@@ -414,7 +415,7 @@ function levelsFor(asked, ctx, plan, daily) {
     }
   }
   const active = (level) => [...tree.units.values()].some((unit) => unit.level === level && unit.active && ctx.below(unit));
-  const levels = LEVELS.slice(scopeLevel + 1).filter((level) => active(level) || used.has(level));
+  const levels = SHOWN_LEVELS.filter((level) => levelIndex(level) > scopeLevel && (active(level) || used.has(level)));
   return { levels, level: asked || levels[0] || null };
 }
 
@@ -656,7 +657,11 @@ function activeLists(key, acc, labels, unitRef) {
 function shape({ key, ctx, plan, rows, levels, level, acc, labels, generatedAt, purgedBefore = null }) {
   const { tree, scope, person } = ctx;
   const { n } = plan;
-  const unitRef = (id) => ({ id, name: tree.units.get(id).name, path: tree.pathOf(id) });
+  // A person's or device's unit, as shown: its department, or its company.
+  const unitRef = (id) => {
+    const shown = tree.shownOf(id);
+    return { id: shown, name: tree.units.get(shown).name, path: tree.shownPathOf(shown) };
+  };
 
   // Active people on the HR lists, per unit and everything above it.
   const headcount = new Map();
@@ -680,7 +685,7 @@ function shape({ key, ctx, plan, rows, levels, level, acc, labels, generatedAt, 
         return {
           id: unit.id,
           name: unit.name,
-          path: tree.pathOf(unit.id),
+          path: tree.shownPathOf(unit.id),
           active: unit.active,
           headcount: headcount.get(unit.id) || 0,
           trend: trendOf(entry.series),
@@ -770,7 +775,7 @@ function shape({ key, ctx, plan, rows, levels, level, acc, labels, generatedAt, 
     levels,
     buckets: plan.buckets,
     focus: plan.focus,
-    scope: scope ? { id: scope.id, name: scope.name, level: scope.level, path: tree.pathOf(scope.id) } : null,
+    scope: scope ? { id: scope.id, name: scope.name, level: scope.level, path: tree.shownPathOf(scope.id) } : null,
     otherLevel: ctx.other,
     unowned: ctx.unowned,
     people: key.people,

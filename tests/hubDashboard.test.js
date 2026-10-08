@@ -236,11 +236,13 @@ test('the old usage page sends its links to the dashboard', async () => {
     }
     const dashboard = await (await fetch(`${base}/`)).text();
     assert.doesNotMatch(dashboard, /href="usage"/, 'nothing links to the old page');
-    // Day, week and month; BU, department and team; the admin tools.
+    // Day, week and month; company and department, no BU or team; the admin
+    // tools.
     for (const period of ['day', 'week', 'month']) assert.match(dashboard, new RegExp(`data-period="${period}"`));
-    for (const id of ['levelTabs', 'unitChart', 'userChart', 'trend', 'selBu', 'selDepartment', 'selTeam', 'dropZone', 'emails', 'tokenForm', 'versions']) {
+    for (const id of ['levelTabs', 'unitChart', 'userChart', 'trend', 'selCompany', 'selDepartment', 'dropZone', 'emails', 'tokenForm', 'versions']) {
       assert.match(dashboard, new RegExp(`id="${id}"`), id);
     }
+    for (const id of ['selBu', 'selTeam']) assert.doesNotMatch(dashboard, new RegExp(`id="${id}"`), id);
     for (const route of ['/api/custom/usage?', '/api/admin/emails/unclassified', '/api/admin/api-tokens', '/api/admin/org/imports']) assert.ok(dashboard.includes(route), route);
   });
 });
@@ -326,16 +328,18 @@ test('page C1: ranges, links, requests and comparisons', () => {
   // Links: what writeUrl writes, readUrl reads back.
   const q = (search) => new URLSearchParams(search);
   const key = { hasKey: true };
-  const defaults = { period: 'week', date: today, from: '', to: '', metric: 'tokens', level: '', sel: { company: '', bu: '', department: '', team: '' }, other: '', unowned: false, employee: '', stack: 'level', layout: 'split', measure: 'total', usort: 'total', ltool: '', lsorts: new Map(),
+  const defaults = { period: 'week', date: today, from: '', to: '', metric: 'tokens', level: '', sel: { company: '', department: '' }, other: '', unowned: false, employee: '', stack: 'level', layout: 'split', measure: 'total', usort: 'total', ltool: '', lsorts: new Map(),
     tool: '' };
   assert.equal(page.writeUrl(defaults, {}, today), '?period=week');
   assert.deepEqual(page.readUrl(q(''), {}, today), defaults);
-  const full = { period: 'month', date: '2026-07-01', from: '', to: '', metric: 'cost', level: 'team', sel: { company: 'ACME', bu: 'Games', department: 'Aurora Dept', team: '' }, other: '', unowned: false,
+  const full = { period: 'month', date: '2026-07-01', from: '', to: '', metric: 'cost', level: 'department', sel: { company: 'ACME', department: 'Aurora Dept' }, other: '', unowned: false,
     employee: 'ACME-1', stack: 'model', layout: 'stack', measure: 'rate', usort: 'change', ltool: 'claude',
     lsorts: new Map([['codex', { sort: 'usage', rev: true }], ['claude', { sort: 'left', rev: false }]]), tool: 'codex' };
-  const link = page.writeUrl(full, { company: 'ACME', bu: 'Games', department: 'Aurora Dept' }, today);
-  assert.equal(link, '?period=month&date=2026-07-01&company=ACME&bu=Games&dept=Aurora+Dept&level=team&tool=codex&metric=cost&employee=ACME-1&stack=model&layout=stack&measure=rate&usort=change&ltool=claude&lsort=claude.left&lsort=codex.usage.rev');
+  const link = page.writeUrl(full, { company: 'ACME', department: 'Aurora Dept' }, today);
+  assert.equal(link, '?period=month&date=2026-07-01&company=ACME&dept=Aurora+Dept&level=department&tool=codex&metric=cost&employee=ACME-1&stack=model&layout=stack&measure=rate&usort=change&ltool=claude&lsort=claude.left&lsort=codex.usage.rev');
   assert.deepEqual(page.readUrl(q(link), key, today), full);
+  // A link from when BUs and teams were shown opens at the department.
+  assert.deepEqual(page.readUrl(q('?period=month&date=2026-07-01&company=ACME&bu=Games&dept=Aurora+Dept&team=Pixel&level=team&tool=codex&metric=cost&employee=ACME-1&stack=model&layout=stack&measure=rate&usort=change&ltool=claude&lsort=claude.left&lsort=codex.usage.rev'), key, today), Object.assign({}, full, { level: '' }));
   // A past year is linked by its first day; this year by nothing.
   const lastYear = Object.assign({}, defaults, { period: 'year', date: '2025-01-01' });
   assert.equal(page.writeUrl(lastYear, {}, today), '?period=year&date=2025-01-01');
@@ -359,13 +363,13 @@ test('page C1: ranges, links, requests and comparisons', () => {
     assert.deepEqual(page.readUrl(q(page.writeUrl(v, {}, today)), {}, today), v, period);
   }
   // 其他 of a unit at one level.
-  const atOther = Object.assign({}, defaults, { sel: { company: 'ACME', bu: '', department: '', team: '' }, other: 'bu' });
-  assert.equal(page.writeUrl(atOther, { company: 'ACME' }, today), '?period=week&company=ACME&other=bu');
-  assert.deepEqual(page.readUrl(q('?period=week&company=ACME&other=bu'), {}, today), atOther);
+  const atOther = Object.assign({}, defaults, { sel: { company: 'ACME', department: '' }, other: 'department' });
+  assert.equal(page.writeUrl(atOther, { company: 'ACME' }, today), '?period=week&company=ACME&other=department');
+  assert.deepEqual(page.readUrl(q('?period=week&company=ACME&other=department'), {}, today), atOther);
   // 沒有對應到員工, in a unit's 其他 too; the level stays for the way back.
   const atUnowned = Object.assign({}, atOther, { unowned: true });
-  assert.equal(page.writeUrl(atUnowned, { company: 'ACME' }, today), '?period=week&company=ACME&other=bu&unowned=1');
-  assert.deepEqual(page.readUrl(q('?period=week&company=ACME&other=bu&unowned=1'), {}, today), atUnowned);
+  assert.equal(page.writeUrl(atUnowned, { company: 'ACME' }, today), '?period=week&company=ACME&other=department&unowned=1');
+  assert.deepEqual(page.readUrl(q('?period=week&company=ACME&other=department&unowned=1'), {}, today), atUnowned);
   assert.equal(page.readUrl(q('?unowned=yes'), {}, today).unowned, false);
   // A date in the current period is not written: the link follows today.
   assert.equal(page.writeUrl(Object.assign({}, defaults, { date: '2026-09-28' }), {}, today), '?period=week');
@@ -407,18 +411,18 @@ test('page C1: ranges, links, requests and comparisons', () => {
   // no level.
   const week = page.viewRange({ period: 'week', date: today }, today);
   assert.equal(page.usageQuery(defaults, week, '', false), 'from=2026-07-13&to=2026-09-30&granularity=week');
-  assert.equal(page.usageQuery(Object.assign({}, defaults, { level: 'team' }), week, 'ACME/Games', false), 'from=2026-07-13&to=2026-09-30&granularity=week&org=ACME%2FGames&level=team');
-  assert.equal(page.usageQuery(atOther, week, 'ACME', false), 'from=2026-07-13&to=2026-09-30&granularity=week&org=ACME&other=bu');
-  assert.equal(page.usageQuery(Object.assign({}, atOther, { level: 'team' }), week, 'ACME', false), 'from=2026-07-13&to=2026-09-30&granularity=week&org=ACME&other=bu');
+  assert.equal(page.usageQuery(Object.assign({}, defaults, { level: 'department' }), week, 'ACME/Games', false), 'from=2026-07-13&to=2026-09-30&granularity=week&org=ACME%2FGames&level=department');
+  assert.equal(page.usageQuery(atOther, week, 'ACME', false), 'from=2026-07-13&to=2026-09-30&granularity=week&org=ACME&other=department');
+  assert.equal(page.usageQuery(Object.assign({}, atOther, { level: 'department' }), week, 'ACME', false), 'from=2026-07-13&to=2026-09-30&granularity=week&org=ACME&other=department');
   assert.equal(page.usageQuery(Object.assign({}, atOther, { employee: 'ACME-1' }), week, 'ACME', true), 'from=2026-07-13&to=2026-09-30&granularity=week&employee=ACME-1');
-  assert.equal(page.usageQuery(atUnowned, week, 'ACME', false), 'from=2026-07-13&to=2026-09-30&granularity=week&org=ACME&other=bu&unowned=1');
-  assert.equal(page.usageQuery(Object.assign({}, defaults, { unowned: true, level: 'team' }), week, 'ACME', false), 'from=2026-07-13&to=2026-09-30&granularity=week&org=ACME&unowned=1', 'no level to compare');
+  assert.equal(page.usageQuery(atUnowned, week, 'ACME', false), 'from=2026-07-13&to=2026-09-30&granularity=week&org=ACME&other=department&unowned=1');
+  assert.equal(page.usageQuery(Object.assign({}, defaults, { unowned: true, level: 'department' }), week, 'ACME', false), 'from=2026-07-13&to=2026-09-30&granularity=week&org=ACME&unowned=1', 'no level to compare');
   assert.equal(page.usageQuery(Object.assign({}, atUnowned, { employee: 'ACME-1' }), week, 'ACME', true), 'from=2026-07-13&to=2026-09-30&granularity=week&employee=ACME-1');
   const thirty = page.viewRange({ period: '30d' }, today);
   assert.equal(page.usageQuery(defaults, thirty, '', false), 'from=2026-08-31&to=2026-09-29&granularity=day&focus=range');
-  const person = Object.assign({}, defaults, { employee: 'ACME-1', level: 'team' });
+  const person = Object.assign({}, defaults, { employee: 'ACME-1', level: 'department' });
   assert.equal(page.usageQuery(person, week, 'ACME', true), 'from=2026-07-13&to=2026-09-30&granularity=week&employee=ACME-1');
-  assert.equal(page.usageQuery(person, week, 'ACME', false), 'from=2026-07-13&to=2026-09-30&granularity=week&org=ACME&level=team');
+  assert.equal(page.usageQuery(person, week, 'ACME', false), 'from=2026-07-13&to=2026-09-30&granularity=week&org=ACME&level=department');
   // A sort by one tool goes in the link.
   const toolSorted = Object.assign({}, defaults, { measure: 'tool:claude', usort: 'tool:codex' });
   assert.equal(page.writeUrl(toolSorted, {}, today), '?period=week&measure=tool%3Aclaude&usort=tool%3Acodex');

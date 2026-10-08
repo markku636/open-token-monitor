@@ -534,9 +534,7 @@ body:not(.rail-pinned) .rail:not(:hover):not(:focus-within) .rail-n{position:abs
   <div class="filter" id="orgFilter" hidden>
     <span class="caption" data-en="Organization">組織</span>
     <span class="combo"><input id="selCompany" data-level="company" role="combobox" aria-label="公司" data-en-aria-label="Company" aria-autocomplete="list" aria-expanded="false" aria-controls="selCompanyList" autocomplete="off" spellcheck="false"><ul class="combo-list" id="selCompanyList" role="listbox" aria-label="公司" data-en-aria-label="Company" hidden></ul></span>
-    <span class="combo"><input id="selBu" data-level="bu" role="combobox" aria-label="BU" aria-autocomplete="list" aria-expanded="false" aria-controls="selBuList" autocomplete="off" spellcheck="false"><ul class="combo-list" id="selBuList" role="listbox" aria-label="BU" hidden></ul></span>
     <span class="combo"><input id="selDepartment" data-level="department" role="combobox" aria-label="部門" data-en-aria-label="Department" aria-autocomplete="list" aria-expanded="false" aria-controls="selDepartmentList" autocomplete="off" spellcheck="false"><ul class="combo-list" id="selDepartmentList" role="listbox" aria-label="部門" data-en-aria-label="Department" hidden></ul></span>
-    <span class="combo"><input id="selTeam" data-level="team" role="combobox" aria-label="團隊" data-en-aria-label="Team" aria-autocomplete="list" aria-expanded="false" aria-controls="selTeamList" autocomplete="off" spellcheck="false"><ul class="combo-list" id="selTeamList" role="listbox" aria-label="團隊" data-en-aria-label="Team" hidden></ul></span>
     <span class="pchip" id="personChip" hidden><span lang="zh-Hant">員工：</span><span lang="en">Employee:&nbsp;</span><b id="personName"></b><button class="ghost" id="personClear" type="button" aria-label="回到單位檢視" data-en-aria-label="Back to the unit view">✕</button></span>
   </div>
 </div>
@@ -690,7 +688,7 @@ body:not(.rail-pinned) .rail:not(:hover):not(:focus-within) .rail-n{position:abs
     <div id="previews"></div>
     <ul class="results" id="orgResults"></ul>
     <div class="scroll" id="imports"></div>
-    <p class="note" data-en="Each import is that company's latest roster: employees and units not on it are deactivated, not deleted. Only employee ID, name, email, BU, department and team are read. Preview the changes before you import. A file older than the last one, one that would deactivate 30% or more of the people, or one whose emails are mostly another company's domain needs a tick to confirm before it imports. Owners follow the emails on the roster; only those not found there use the manual assignments below.">每次匯入都是那家公司的最新名單：名單上沒有的員工與單位會停用，不會刪除。只讀員工編號、姓名、email、BU、部門與團隊。先看差異再匯入；檔案比上次舊、會停用三成以上的人、或 email 大多是別家公司的網域時，要勾選確認才能匯入。歸屬以名單上的 email 為準，找不到的才用下面的手動歸類。</p>
+    <p class="note" data-en="Each import is that company's latest roster: employees and units not on it are deactivated, not deleted. Only employee ID, name, email, BU, department and team are read; the dashboard shows companies and departments, with a team counted in its department and BUs left out. Preview the changes before you import. A file older than the last one, one that would deactivate 30% or more of the people, or one whose emails are mostly another company's domain needs a tick to confirm before it imports. Owners follow the emails on the roster; only those not found there use the manual assignments below.">每次匯入都是那家公司的最新名單：名單上沒有的員工與單位會停用，不會刪除。只讀員工編號、姓名、email、BU、部門與團隊；畫面只分公司與部門，團隊算在所屬部門，BU 不顯示。先看差異再匯入；檔案比上次舊、會停用三成以上的人、或 email 大多是別家公司的網域時，要勾選確認才能匯入。歸屬以名單上的 email 為準，找不到的才用下面的手動歸類。</p>
   </section>
 
   <section id="issueSection">
@@ -703,7 +701,7 @@ body:not(.rail-pinned) .rail:not(:hover):not(:focus-within) .rail-n{position:abs
     <h3><span data-en="Unassigned emails">未歸類 email</span> <span class="hint" id="emailHint"></span></h3>
     <div class="bar" id="emailBulk" hidden>
       <span id="emailPicked"></span>
-      <select id="emailBulkUnit" aria-label="歸到哪個部門或團隊" data-en-aria-label="Department or team to assign to"></select>
+      <select id="emailBulkUnit" aria-label="歸到哪個部門" data-en-aria-label="Department to assign to"></select>
       <button type="button" id="emailBulkGive" data-en="Assign ticked to this unit">把勾選的歸到這個單位</button>
       <button type="button" id="emailBulkOther" class="ghost" data-en="Assign ticked to Other">勾選的歸到其他</button>
     </div>
@@ -863,10 +861,12 @@ const LIMIT_SORTS = {
 const STATUS_LABELS = { __proto__: null, active: L('有用量', 'In use'), waiting: L('已安裝待用', 'Installed, unused'), missing: L('未安裝', 'Not installed'), untracked: L('未追蹤', 'Not tracked') };
 const ACCOUNT_STALE_HINT = L('stale：帳號的額度太久沒更新（回報它的裝置離線，或用戶端查不到額度），數字停在最後一次回報。\nlive：額度剛由在線的裝置回報，是最新的。',
   'stale: the account\'s limits have not been updated for too long (the device that reports them is offline, or the client cannot read them), so the figures are from the last report.\nlive: the limits were just reported by a device that is online, so they are current.');
-const LEVELS = ['company', 'bu', 'department', 'team'];
+// The org tree also has BUs and teams (units.js), but the dashboard shows two
+// levels: a team counts in its department, and a BU is not shown.
+const LEVELS = ['company', 'department'];
 const LEVEL_LABELS = { company: L('公司', 'Company'), bu: 'BU', department: L('部門', 'Department'), team: L('團隊', 'Team') };
 // The URL names each level by a short key (dept is what links already used).
-const LEVEL_PARAMS = { company: 'company', bu: 'bu', department: 'dept', team: 'team' };
+const LEVEL_PARAMS = { company: 'company', department: 'dept' };
 const METRIC_LABELS = { tokens: L('Token', 'Tokens'), cost: L('等值成本', 'Equivalent cost') };
 const WEEKDAYS = L(['日', '一', '二', '三', '四', '五', '六'], ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
 const OWNER_SOURCES = { 'auto:reported': L('用戶端回報', 'Reported by the client'), 'auto:ai-email': L('AI 帳號', 'AI account'), 'auto:email-assigned': L('email 歸類', 'Email assignment'), 'auto:released': L('改回自動', 'Back to automatic') };
@@ -986,7 +986,7 @@ function wireLanguage() {
 // matched case-insensitively against the tree from /api/custom/org.
 const view = {
   period: 'week', date: todayKey(), from: '', to: '', metric: 'tokens', level: '',
-  sel: { company: '', bu: '', department: '', team: '' }, other: '',
+  sel: { company: '', department: '' }, other: '',
   employee: '', stack: 'level', layout: 'split', measure: 'total', usort: 'total',
   ltool: '', lsorts: new Map(), tool: ''
 };
@@ -1314,9 +1314,9 @@ function readUrl(q, stored, today) {
     from: period === 'custom' ? from : '',
     to: period === 'custom' ? to : '',
     metric: ['tokens', 'cost'].includes(q.get('metric')) ? q.get('metric') : pick(s.metric, ['tokens', 'cost']),
-    level: ['company', 'bu', 'department', 'team'].includes(q.get('level')) ? q.get('level') : '',
-    sel: { company: q.get('company') || '', bu: q.get('bu') || '', department: q.get('dept') || '', team: q.get('team') || '' },
-    other: ['company', 'bu', 'department', 'team'].includes(q.get('other')) ? q.get('other') : '',
+    level: ['company', 'department'].includes(q.get('level')) ? q.get('level') : '',
+    sel: { company: q.get('company') || '', department: q.get('dept') || '' },
+    other: ['company', 'department'].includes(q.get('other')) ? q.get('other') : '',
     unowned: q.get('unowned') === '1',
     employee: s.hasKey && employee.length <= 64 ? employee : '',
     stack: pick(q.get('stack'), ['level', 'person', 'model', 'client', 'device']),
@@ -1439,7 +1439,7 @@ function writeUrl(v, names, today) {
     q.set('to', v.to);
   }
   const n = names || {};
-  for (const [level, key] of [['company', 'company'], ['bu', 'bu'], ['department', 'dept'], ['team', 'team']]) if (n[level]) q.set(key, n[level]);
+  for (const [level, key] of [['company', 'company'], ['department', 'dept']]) if (n[level]) q.set(key, n[level]);
   if (v.other) q.set('other', v.other);
   if (v.unowned) q.set('unowned', '1');
   if (v.level) q.set('level', v.level);
@@ -1625,8 +1625,17 @@ function chainOf(id) {
   return chain;
 }
 
-function unitPath(id) {
-  return chainOf(id).map((u) => u.name).join(' / ');
+// The shown units from the company down to the one `id` counts in: a team
+// shows as its department, and a BU is left out. `units` is the page's tree,
+// or another list of units by id (部門清單 has the inactive ones too).
+function unitPath(id, units = orgUnits) {
+  const names = [];
+  const seen = new Set();
+  for (let unit = units.get(id); unit && !seen.has(unit.id); unit = units.get(unit.parentId)) {
+    seen.add(unit.id);
+    if (LEVELS.includes(unit.level)) names.unshift(unit.name);
+  }
+  return names.join(' / ');
 }
 
 // The chosen unit of each level, top down; a name that no longer matches, or
@@ -1654,8 +1663,8 @@ function scopeUnit() {
 // Selects a unit and, above it, the units it is in, so the selects and the
 // URL say the same thing whichever select it was picked from.
 function selectUnit(id) {
-  view.sel = { company: '', bu: '', department: '', team: '' };
-  for (const unit of chainOf(id)) view.sel[unit.level] = unit.name;
+  view.sel = { company: '', department: '' };
+  for (const unit of chainOf(id)) if (LEVELS.includes(unit.level)) view.sel[unit.level] = unit.name;
   view.level = '';
   view.other = '';
   view.unowned = false;
@@ -1686,7 +1695,7 @@ function scopeId() {
   return unit ? unit.id : '';
 }
 
-const COMBO_IDS = { company: 'selCompany', bu: 'selBu', department: 'selDepartment', team: 'selTeam' };
+const COMBO_IDS = { company: 'selCompany', department: 'selDepartment' };
 // What each level's box lists: 全部… first (id ''), then its units.
 const comboOptions = new Map();
 
@@ -1697,12 +1706,16 @@ function renderOrgFilter() {
   for (const level of LEVELS) {
     const input = $(COMBO_IDS[level]);
     const units = unitsAt(level, within);
-    const all = L('全部' + (level === 'bu' ? ' BU' : LEVEL_LABELS[level]), { company: 'All companies', bu: 'All BUs', department: 'All departments', team: 'All teams' }[level]);
+    const all = L('全部' + LEVEL_LABELS[level], { company: 'All companies', department: 'All departments' }[level]);
+    const names = new Map();
+    for (const unit of units) names.set(unit.name, (names.get(unit.name) || 0) + 1);
     comboOptions.set(level, [{ id: '', label: all, text: '' }].concat(units.map((unit) => {
       // Where the unit sits below what is already chosen: a department listed
-      // for a whole company says which BU it is in.
+      // for every company says which company it is in. A BU is named only to
+      // tell two departments of the same name apart.
       const chain = chainOf(unit.id);
-      const between = chain.slice(within ? chain.findIndex((u) => u.id === within) + 1 : 0, -1).map((u) => u.name);
+      const between = chain.slice(within ? chain.findIndex((u) => u.id === within) + 1 : 0, -1)
+        .filter((u) => LEVELS.includes(u.level) || names.get(unit.name) > 1).map((u) => u.name);
       const label = unit.name + (between.length ? L('（', ' (') + between.join(' / ') + L('）', ')') : '') + ' · ' + unit.devices + L(' 台', ' ' + plural(unit.devices, 'device', 'devices'));
       return { id: unit.id, label, text: [unit.name].concat(between).join(' ').toLowerCase() };
     })));
@@ -1786,7 +1799,7 @@ function comboPick(input, id) {
     // "All" at a level keeps what is chosen above it.
     const keep = LEVELS.slice(0, LEVELS.indexOf(level));
     const picked = selection();
-    view.sel = { company: '', bu: '', department: '', team: '' };
+    view.sel = { company: '', department: '' };
     for (const l of keep) if (picked[l]) view.sel[l] = picked[l].name;
     view.level = '';
     view.other = '';
@@ -2039,7 +2052,7 @@ async function loadUsage(opts = {}) {
     return loadUsage(opts);
   }
   if (status === 404 && error === 'unknown_org' && scope) {
-    view.sel = { company: '', bu: '', department: '', team: '' };
+    view.sel = { company: '', department: '' };
     view.other = '';
     syncUrl('replace');
     renderOrgFilter();
@@ -2220,7 +2233,7 @@ function focusLabel() {
   return usage && usage.focus.to < range.focusTo ? label + L('（到 ' + usage.focus.to.slice(5) + '）', ' (to ' + usage.focus.to.slice(5) + ')') : label;
 }
 
-// 全部公司 › ACME › Games: the units above are buttons that open them, compared
+// 全部公司 › ACME › Arcade: the units above are buttons that open them, compared
 // at the level of the unit you came from, with its row highlighted. 其他
 // (ACME › 其他) is a step of its own: the unit before it opens compared at
 // 其他's level, and a person opened from 其他 goes back to it. 沒有對應到員工
@@ -2232,7 +2245,7 @@ function renderContext() {
   const person = usage.employee;
   const unowned = !person && !!usage.unowned;
   const here = person ? scopeUnit() : usage.scope;
-  const chain = here ? chainOf(here.id) : [];
+  const chain = here ? chainOf(here.id).filter((u) => LEVELS.includes(u.level)) : [];
   const steps = [{ id: '', name: L('全部公司', 'All companies') }].concat(chain.map((u) => ({ id: u.id, name: u.name })));
   if (here && !chain.length) steps.push({ id: here.id, name: here.name });
   const other = person ? view.other : usage.otherLevel;
@@ -2257,7 +2270,7 @@ function renderContext() {
       if (step.other || (unowned && k === steps.length - 1)) return;
       if (step.id) selectUnit(step.id);
       else {
-        view.sel = { company: '', bu: '', department: '', team: '' };
+        view.sel = { company: '', department: '' };
         view.other = '';
       }
       if (other && !person && k === steps.length - 2) {
@@ -2770,7 +2783,7 @@ function levelNounEn(level, n = 1) {
 // no domain places are left.
 function otherExplanation(level) {
   if (level === 'company') return L('不屬於任何一個公司的用量：還沒有歸屬、email 網域也對不到公司的裝置', 'usage that belongs to no company: devices with no owner yet whose email domain matches no company');
-  const examples = { bu: L('沒有 BU 的部門、公司直屬的人', 'departments with no BU, people directly under a company'), department: L('BU 直屬、沒有部門的人', 'people directly under a BU with no department'), team: L('部門直屬、沒有團隊的人', 'people directly under a department with no team') }[level];
+  const examples = { department: L('不在任何部門的人', 'people in no department') }[level];
   return L(tidy('不屬於任何一個' + levelWord(level) + '的用量：' + (examples ? examples + '，以及' : '') + '只靠 email 網域歸到公司、或還沒有歸屬的裝置'), 'usage that belongs to no ' + levelNounEn(level) + ': ' + (examples ? examples + ', and ' : '') + 'devices placed in a company only by their email domain, or with no owner yet');
 }
 
@@ -5390,11 +5403,24 @@ async function refreshImports() {
     if (row.overdue) when.append(' ', el('span', 'badge stale', L('超過一個月沒更新', 'Not updated in over a month')));
     tr.append(el('td', '', row.company), el('td', 'num', nf.format(row.employees)), when,
       el('td', '', last && last.fileName ? last.fileName : '—'), el('td', '', last ? last.effectiveFrom || '—' : '—'),
-      el('td', '', last && last.summary ? changeSummary(last.summary.changes) : '—'));
+      el('td', '', last && last.summary ? changeSummary(shownCounts(last.summary)) : '—'));
     rows.append(tr);
   }
   table.append(rows);
   box.append(table);
+}
+
+// An import's change counts with only the companies and departments among its
+// new and deactivated units. An import from before unitLevels was kept counts
+// every unit.
+function shownCounts(summary) {
+  const counts = Object.assign({}, summary.changes);
+  const levels = summary.unitLevels;
+  if (!levels || !summary.unitIds) return counts;
+  for (const key of ['unitsAdded', 'unitsDeactivated']) {
+    counts[key] = (summary.unitIds[key] || []).filter((id) => LEVELS.includes(levels[id])).length;
+  }
+  return counts;
 }
 
 // 「新進 2 · 離職 1」 from an import's change counts; 無變更 when all are 0.
@@ -5464,6 +5490,13 @@ function changeLine(kind, entry) {
   return '';
 }
 
+// An import's changes of one kind, as the dashboard shows them: new and
+// deactivated units are only its companies and departments.
+function shownChanges(key, list) {
+  if (key !== 'unitsAdded' && key !== 'unitsDeactivated') return list || [];
+  return (list || []).filter((entry) => LEVELS.includes(entry.level));
+}
+
 function renderPreviews() {
   const box = $('previews');
   box.textContent = '';
@@ -5472,18 +5505,18 @@ function renderPreviews() {
     const warnings = diff.warnings || [];
     const card = el('div', 'preview' + (warnings.length ? ' warn' : ''));
     card.append(el('h4', '', body.company + ' · ' + name));
-    card.append(el('div', 'hint', L(body.employees + ' 人、' + body.bus + ' 個 BU、' + body.departments + ' 個部門、' + body.teams + ' 個團隊', body.employees + ' ' + plural(body.employees, 'person', 'people') + ', ' + body.bus + ' ' + plural(body.bus, 'BU', 'BUs') + ', ' + body.departments + ' ' + plural(body.departments, 'department', 'departments') + ', ' + body.teams + ' ' + plural(body.teams, 'team', 'teams'))
+    card.append(el('div', 'hint', L(body.employees + ' 人、' + body.departments + ' 個部門', body.employees + ' ' + plural(body.employees, 'person', 'people') + ', ' + body.departments + ' ' + plural(body.departments, 'department', 'departments'))
       + (body.fileDate ? L(' · 檔案日期 ', ' · file date ') + body.fileDate : '') + L(' · 維持不變 ' + (diff.unchanged || 0) + ' 人', ' · ' + (diff.unchanged || 0) + ' unchanged')));
     for (const w of warnings) card.append(el('div', 'warning', '⚠ ' + (WARNING_TEXT[w.code] ? WARNING_TEXT[w.code](w) : w.code)));
     const counts = el('div', 'counts');
     for (const [key, label] of CHANGE_LABELS) {
-      const n = (diff[key] || []).length;
+      const n = shownChanges(key, diff[key]).length;
       if (n) counts.append(el('span', 'chip active', label + ' ' + n));
     }
     if (!counts.childNodes.length) counts.append(el('span', 'chip', L('和目前的名單相同，沒有變動', 'Same as the current roster, no changes')));
     card.append(counts);
     for (const [key, label] of CHANGE_LABELS) {
-      const list = diff[key] || [];
+      const list = shownChanges(key, diff[key]);
       if (!list.length) continue;
       const more = el('details');
       more.append(el('summary', '', L(label + '（' + list.length + '）', label + ' (' + list.length + ')')));
@@ -5689,14 +5722,15 @@ function ruleTarget(rule) {
   return L((rule.employeeName || rule.employeeId) + '（' + rule.employeeId + '）', (rule.employeeName || rule.employeeId) + ' (' + rule.employeeId + ')');
 }
 
-// The departments and teams an address can be given to, as <option>s, from
-// the admin's unit list (active ones only).
+// The departments an address can be given to, as <option>s, from the admin's
+// unit list (active ones only). A rule an admin gave to a team before keeps
+// working, and shows as its department.
 function unitOptions(select, units, chosen) {
   select.textContent = '';
-  select.append(new Option(L('選擇部門或團隊…', 'Choose a department or team…'), ''));
+  select.append(new Option(L('選擇部門…', 'Choose a department…'), ''));
   for (const u of units) {
-    if (!u.active || (u.level !== 'department' && u.level !== 'team')) continue;
-    select.append(new Option(u.path.filter((p) => p !== '-').join(' / ') + ' · ' + LEVEL_LABELS[u.level], u.id));
+    if (!u.active || u.level !== 'department') continue;
+    select.append(new Option(unitPath(u.id), u.id));
   }
   select.value = chosen || '';
 }
@@ -5738,7 +5772,7 @@ async function refreshEmails() {
         tickCell.append(tick);
         const cell = el('div', 'cell-actions');
         const select = el('select');
-        select.setAttribute('aria-label', L(row.email + ' 歸到哪個部門或團隊', 'Department or team for ' + row.email));
+        select.setAttribute('aria-label', L(row.email + ' 歸到哪個部門', 'Department for ' + row.email));
         unitOptions(select, unitList, emailPicks.get(row.email));
         select.addEventListener('change', () => emailPicks.set(row.email, select.value));
         const give = smallButton(L('歸到這個單位', 'Assign to this unit'), () => setEmailRule(row.email, { unitId: select.value }), '');
@@ -5797,7 +5831,7 @@ function ruleDone(email, body) {
 
 async function setEmailRule(email, rule) {
   if (!rule.other && !rule.unitId && !rule.employeeId) {
-    $('emailNote').textContent = L('請先選部門或團隊。', 'Choose a department or team first.');
+    $('emailNote').textContent = L('請先選部門。', 'Choose a department first.');
     return;
   }
   const { status, body } = await postJson('/api/admin/emails/' + encodeURIComponent(email), 'PUT', rule);
@@ -5813,7 +5847,7 @@ async function setEmailRule(email, rule) {
 // The ticked addresses, one rule each, in turn.
 async function setEmailRules(rule) {
   if (!rule.other && !rule.unitId) {
-    $('emailNote').textContent = L('請先選部門或團隊。', 'Choose a department or team first.');
+    $('emailNote').textContent = L('請先選部門。', 'Choose a department first.');
     return;
   }
   const done = [];
@@ -5860,14 +5894,16 @@ function renderDepts() {
   }
   const words = $('deptSearch').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const inactive = $('deptInactive').checked;
-  const rows = deptRows.filter((u) => (inactive || u.active)
-    && words.every((w) => u.path.join(' / ').toLowerCase().includes(w)));
-  const companies = deptRows.filter((u) => u.level === 'company' && u.active).length;
-  const departments = deptRows.filter((u) => u.active && u.level === 'department').length;
-  const teams = deptRows.filter((u) => u.active && u.level === 'team').length;
-  $('deptHint').textContent = L(companies + ' 家公司、' + departments + ' 個部門、' + teams + ' 個團隊', companies + ' ' + plural(companies, 'company', 'companies') + ', ' + departments + ' ' + plural(departments, 'department', 'departments') + ', ' + teams + ' ' + plural(teams, 'team', 'teams'));
+  // Companies and departments only: a department's figures count its teams.
+  const shown = deptRows.filter((u) => LEVELS.includes(u.level));
+  const byId = new Map(deptRows.map((u) => [u.id, u]));
+  const rows = shown.filter((u) => (inactive || u.active)
+    && words.every((w) => unitPath(u.id, byId).toLowerCase().includes(w)));
+  const companies = shown.filter((u) => u.level === 'company' && u.active).length;
+  const departments = shown.filter((u) => u.active && u.level === 'department').length;
+  $('deptHint').textContent = L(companies + ' 家公司、' + departments + ' 個部門', companies + ' ' + plural(companies, 'company', 'companies') + ', ' + departments + ' ' + plural(departments, 'department', 'departments'));
   if (!rows.length) {
-    box.replaceChildren(el('div', 'empty', deptRows.length ? L('沒有符合的單位。', 'No matching units.') : L('還沒有匯入過人事公告。', 'No HR announcements imported yet.')));
+    box.replaceChildren(el('div', 'empty', shown.length ? L('沒有符合的單位。', 'No matching units.') : L('還沒有匯入過人事公告。', 'No HR announcements imported yet.')));
     return;
   }
   const table = el('table');
@@ -5875,12 +5911,12 @@ function renderDepts() {
   const body = el('tbody');
   for (const u of rows) {
     const tr = el('tr');
-    const depth = Math.min(3, Math.max(0, u.path.length - 1));
+    const depth = LEVELS.indexOf(u.level);
     const name = el('td', depth ? 'depth' + depth : '', u.name);
     if (!u.active) name.append(' ', el('span', 'badge off', L('已停用', 'Inactive')));
     const staff = el('td');
-    staff.append(smallButton(L('看員工', 'See employees'), () => showStaffOf(u)));
-    tr.append(name, el('td', '', LEVEL_LABELS[u.level] || u.level), el('td', 'num', nf.format(u.headcount) + (u.ownHeadcount && u.ownHeadcount !== u.headcount ? L('（直屬 ' + u.ownHeadcount + '）', ' (' + u.ownHeadcount + ' direct)') : '')),
+    staff.append(smallButton(L('看員工', 'See employees'), () => showStaffOf(unitPath(u.id, byId))));
+    tr.append(name, el('td', '', LEVEL_LABELS[u.level] || u.level), el('td', 'num', nf.format(u.headcount)),
       el('td', 'num', nf.format(u.devices)), el('td', 'num', tokens(u.recentTokens) + ' · ' + usd(u.recentCostUsd)), staff);
     body.append(tr);
   }
@@ -5889,8 +5925,8 @@ function renderDepts() {
 }
 
 // 看員工: the staff list, narrowed to the unit's path.
-function showStaffOf(unit) {
-  $('staffSearch').value = unit.path.filter((p) => p !== '-').join(' / ');
+function showStaffOf(path) {
+  $('staffSearch').value = path;
   $('staffCompany').value = '';
   $('staffState').value = 'active';
   $('staffBox').open = true;
@@ -5914,8 +5950,9 @@ async function refreshStaff() {
   renderStaff();
 }
 
+// Where an employee is, as the dashboard shows it: company / department.
 function staffPath(e) {
-  return (e.unitPath || []).filter((p) => p !== '-').join(' / ');
+  return (e.unitId && unitPath(e.unitId)) || (e.unitPath || []).filter((p) => p !== '-').join(' / ');
 }
 
 function renderStaff() {

@@ -165,9 +165,11 @@ scope `analytics:read`。dashboard 上的用量分析：一個單位（或全部
 | `compare` | `previous` | `previous`：`focus=last` 和前一期的同一段比（日和上週同一天比；還沒過完的一期比前一期同樣的天數），`focus=range` 和緊接在前、一樣長的天數比；`year`：去年同期（日與週往前 52 週，月與整個區間用去年的同一個日期）；`custom`：`compareFrom`–`compareTo` |
 | `compareFrom`、`compareTo` | — | `compare=custom` 的比較期間：最多 400 天、不能晚於今天、不能和焦點重疊 |
 | `unitId` | 全部公司 | 範圍：這個單位與其下所有單位 |
-| `level` | 範圍底下第一個有單位的層級 | `units` 是哪一層的單位，必須在範圍之下（否則 `400 bad_level`） |
+| `level` | 範圍底下第一個有單位的公司或部門層級 | `units` 是哪一層的單位，必須在範圍之下（否則 `400 bad_level`）。和 dashboard 一樣只預設公司與部門；`bu`、`team` 要明確指定 |
 | `employeeId` | — | 一位員工的用量，不論算在哪個單位；`unitId` 與 `level` 不看 |
 | `client` | — | 只算這個工具，例如 `claude`；這時 `models` 是空的（模型的用量沒有記錄是哪個工具） |
+
+和 dashboard 一樣只分公司與部門：人與裝置的 `unit` 是他所在的部門（沒有部門時是公司），`path` 不含 BU。其他端點（`units`、`employees` 與 `reports:read` 的報表）照舊保留四層。
 
 回應的主要欄位（完整的欄位見 `/llms-full.txt` 與 OpenAPI）：
 

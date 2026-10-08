@@ -6,8 +6,13 @@
 // that compares units at one level asks the tree the same question: which unit
 // of that level a unit is in, if any. A unit with none there counts as
 // "other" at that level.
+//
+// The tree keeps every level HR fills in, but the dashboard shows two: company
+// and department. A BU is not shown, and a team counts in its department.
 
 const LEVELS = Object.freeze(['company', 'bu', 'department', 'team']);
+// The levels units are shown and compared at.
+const SHOWN_LEVELS = Object.freeze(['company', 'department']);
 
 function levelIndex(level) {
   return LEVELS.indexOf(level);
@@ -62,6 +67,20 @@ function unitTree(rows) {
     return chainOf(id).slice().reverse().map((unitId) => units.get(unitId).name);
   }
 
+  // The unit `id` is shown as: its department, or its company when it is in
+  // no department.
+  function shownOf(id) {
+    if (!units.has(id)) return null;
+    return ancestorAt(id, 'department') || ancestorAt(id, 'company') || id;
+  }
+
+  // The names of the shown units from the company down to `id`'s shown unit.
+  function shownPathOf(id) {
+    const shown = shownOf(id);
+    if (!shown) return [];
+    return chainOf(shown).slice().reverse().filter((unitId) => SHOWN_LEVELS.includes(units.get(unitId).level)).map((unitId) => units.get(unitId).name);
+  }
+
   // `id` and every unit under it.
   function subtree(id) {
     const out = new Set();
@@ -75,7 +94,7 @@ function unitTree(rows) {
     return out;
   }
 
-  return { units, chainOf, ancestorAt, within, pathOf, subtree };
+  return { units, chainOf, ancestorAt, within, pathOf, shownOf, shownPathOf, subtree };
 }
 
-module.exports = { LEVELS, levelBelow, levelIndex, unitTree };
+module.exports = { LEVELS, SHOWN_LEVELS, levelBelow, levelIndex, unitTree };

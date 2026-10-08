@@ -8,6 +8,10 @@ hub 與 Electron 用戶端打包（`X.Y.Z-corp.N`）的功能異動，新的在�
 
 ## 未發行
 
+- Dashboard 的組織只分兩級：公司 → 部門（[hub.zh-TW.md](docs/hub.zh-TW.md)「組織與裝置歸屬」）。
+  - 篩選列只剩公司與部門，比較的層級只有公司與部門；團隊算在所屬部門，BU 不顯示。舊網址的 `bu=`、`team=` 不再作用。
+  - 人、裝置與帳號的單位顯示成「公司 / 部門」；部門清單、匯入預覽與 email 歸類也只列公司與部門，email 只能歸到部門（之前歸到團隊的規則照常有效）。
+  - 資料不變：匯入仍讀 BU 與團隊欄，資料庫照舊存四層。`GET /api/custom/usage` 與 `usage/analysis` 預設只比公司與部門、單位路徑不含 BU，`level=bu|team` 仍可指定；組織樹、員工清單與 `reports:read` 的報表不變。
 - 用戶端改從 GitHub 發行與更新（[client-build.zh-TW.md](docs/client-build.zh-TW.md)「從 GitHub 發行」）：
   - 推 `client-v*` tag 到 GitHub，`.github/workflows/client-release.yml` 跑 verify、打包 Windows、macOS、Linux，並建立 GitHub Release。
   - repo 是公開的，所以這些安裝檔不帶 hub URL 與金鑰（新設定 `TM_CLIENT_NO_HUB=1`），使用者在「多裝置同步」自己填。

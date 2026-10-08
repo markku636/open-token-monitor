@@ -108,7 +108,7 @@ for (const backend of BACKENDS) {
       const all = await usage(hub.base, '', {});
       assert.equal(all.status, 200, JSON.stringify(all.body));
       assert.equal(all.headers.get('access-control-allow-origin'), null, 'keyless: this site only');
-      assert.deepEqual([all.body.granularity, all.body.level, all.body.levels], ['day', 'company', ['company', 'bu', 'department', 'team']]);
+      assert.deepEqual([all.body.granularity, all.body.level, all.body.levels], ['day', 'company', ['company', 'department']], 'BUs and teams are not offered');
       assert.deepEqual(all.body.buckets.map((b) => b.key), [D3, D2, D1, D0]);
       assert.deepEqual(all.body.focus, { key: D0, from: D0, to: D0, days: 1 });
       assert.deepEqual([all.body.totals.tokens, all.body.totals.costUsd], [1977, 9.92]);
@@ -127,12 +127,12 @@ for (const backend of BACKENDS) {
       // or an employee no., and a name without its Chinese part.
       assert.doesNotMatch(JSON.stringify(all.body), /李安/);
       assert.deepEqual(allActive.employees.map((e) => [e.name, e.unit && e.unit.path.join('/'), e.focus.tokens]), [
-        ['Ann Lee', 'ACME/Games/Aurora/Ember Team', 1000],
+        ['Ann Lee', 'ACME/Aurora', 1000],
         ['Fay', 'GLOBEX/Genome', 400],
         ['Di', 'ACME/GM Office', 50]
       ]);
       assert.deepEqual(allActive.devices.map((d) => [d.hostname, d.employee && d.employee.name, d.unit && d.unit.path.join('/'), d.focus.tokens]), [
-        ['DEV-A', 'Ann Lee', 'ACME/Games/Aurora/Ember Team', 1000],
+        ['DEV-A', 'Ann Lee', 'ACME/Aurora', 1000],
         ['DEV-N', 'Fay', 'GLOBEX/Genome', 400],
         ['DEV-C', 'Di', 'ACME/GM Office', 50],
         ['DEV-E', null, 'ACME', 20],
@@ -140,13 +140,16 @@ for (const backend of BACKENDS) {
       ]);
       assert.doesNotMatch(JSON.stringify(allActive), /example\.test|ACME-\d|GLOBEX-\d/);
 
-      // One company: its BUs by default. GM Office is in no BU, and dev-e is
-      // in ACME by domain only: both are other.
-      const at = await usage(hub.base, 'org=ACME', CLIENT);
+      // One company: its departments by default, the only level offered.
+      const byDefault = await usage(hub.base, 'org=ACME', CLIENT);
+      assert.deepEqual([byDefault.body.level, byDefault.body.levels], ['department', ['department']]);
+      // Its BUs, asked for. GM Office is in no BU, and dev-e is in ACME by
+      // domain only: both are other.
+      const at = await usage(hub.base, 'org=ACME&level=bu', CLIENT);
       assert.equal(at.status, 200);
       assert.equal(at.headers.get('access-control-allow-origin'), '*');
       assert.deepEqual(at.body.scope, { id: 'ACME', name: 'ACME', level: 'company', path: ['ACME'] });
-      assert.deepEqual([at.body.level, at.body.levels], ['bu', ['bu', 'department', 'team']]);
+      assert.deepEqual([at.body.level, at.body.levels], ['bu', ['department']]);
       assert.deepEqual(unitTrends(at.body), { Games: [100, 100, 300, 1000] });
       assert.deepEqual(at.body.other.tokens, [0, 0, 0, 70]);
       assert.deepEqual(at.body.trend.tokens, [100, 100, 300, 1070]);
@@ -162,7 +165,7 @@ for (const backend of BACKENDS) {
       assert.deepEqual(unitTrends(byDept.body), { Aurora: [100, 100, 300, 1000], 'GM Office': [0, 0, 0, 50] });
       assert.deepEqual(byDept.body.other.tokens, [0, 0, 0, 20]);
       const aurora = byDept.body.units.find((u) => u.name === 'Aurora');
-      assert.deepEqual([aurora.id, aurora.path, aurora.headcount, aurora.trend.employees], ['ACME/Games/Aurora', ['ACME', 'Games', 'Aurora'], 3, [1, 1, 1, 1]]);
+      assert.deepEqual([aurora.id, aurora.path, aurora.headcount, aurora.trend.employees], ['ACME/Games/Aurora', ['ACME', 'Aurora'], 3, [1, 1, 1, 1]]);
       const byTeam = await usage(hub.base, 'org=ACME&level=team', CLIENT);
       assert.deepEqual(unitTrends(byTeam.body), { 'Ember Team': [100, 100, 0, 1000], '3D Team': [0, 0, 300, 0] }, 'sorted by the focus day');
       assert.deepEqual(byTeam.body.other.tokens, [0, 0, 0, 70], 'Cy is Aurora\'s own staff, Di is in GM Office, dev-e is ACME\'s by domain');
@@ -212,7 +215,7 @@ for (const backend of BACKENDS) {
 
       // Inside a BU, its departments; inside a team, nothing below it.
       const games = await usage(hub.base, `org=${encodeURIComponent('ACME/Games')}`, {});
-      assert.deepEqual([games.body.level, games.body.levels], ['department', ['department', 'team']]);
+      assert.deepEqual([games.body.level, games.body.levels], ['department', ['department']]);
       assert.deepEqual(games.body.other.tokens, [0, 0, 0, 0]);
       const team = await usage(hub.base, `org=${encodeURIComponent('ACME/Games/Aurora/Ember Team')}`, {});
       assert.deepEqual([team.body.level, team.body.levels, team.body.units], [null, [], []]);
@@ -222,9 +225,9 @@ for (const backend of BACKENDS) {
       const atAdmin = await usage(hub.base, 'org=ACME');
       assert.equal(atAdmin.body.people, true);
       assert.deepEqual(atAdmin.body.users.map((u) => [u.name, u.other, u.unit && u.unit.path.join('/'), u.trend.tokens]), [
-        ['Ann Lee', false, 'ACME/Games/Aurora/Ember Team', [100, 100, 0, 1000]],
+        ['Ann Lee', false, 'ACME/Aurora', [100, 100, 0, 1000]],
         ['Di', false, 'ACME/GM Office', [0, 0, 0, 50]],
-        ['Bo', false, 'ACME/Games/Aurora/3D Team', [0, 0, 300, 0]],
+        ['Bo', false, 'ACME/Aurora', [0, 0, 300, 0]],
         [null, true, null, [0, 0, 0, 20]]
       ]);
       assert.equal(atAdmin.body.users[0].email, 'ann@example.test');
@@ -371,14 +374,14 @@ for (const backend of BACKENDS) {
       assert.match(w.earliest.daily, /^\d{4}-\d{2}-\d{2}$/);
       assert.ok(w.earliest.daily <= '2026-08-31', w.earliest.daily);
       assert.ok(w.earliest.monthly === null || /^\d{4}-\d{2}$/.test(w.earliest.monthly));
-      assert.deepEqual([w.level, w.levels], ['company', ['company', 'bu', 'department', 'team']]);
+      assert.deepEqual([w.level, w.levels], ['company', ['company', 'department']]);
       assert.deepEqual(w.units.map((u) => [u.name, u.trend.tokens, u.focus, u.previous]), [['ACME', [0, 900, 360], figures(360, 3.6, 3, 3), figures(500, 5, 2, 2)]]);
       assert.deepEqual([w.other.tokens, w.other.focus, w.other.previous], [[0, 0, 70], figures(70, 0.7, 1, 0), figures(0, 0, 0, 0)]);
       // Each person, "other" last; each with the unit of their latest day.
       assert.deepEqual(w.users.map((u) => [u.name, u.unit && u.unit.path.join('/'), u.trend.tokens, u.focus, u.previous]), [
-        ['Ann Lee', 'ACME/Games/Aurora/Ember Team', [0, 600, 300], { tokens: 300, costUsd: 3, devices: 1, activeDays: 2 }, { tokens: 200, costUsd: 2, devices: 1, activeDays: 1 }],
-        ['Bo', 'ACME/Games/Aurora/3D Team', [0, 300, 40], { tokens: 40, costUsd: 0.4, devices: 1, activeDays: 1 }, { tokens: 300, costUsd: 3, devices: 1, activeDays: 1 }],
-        ['Cy', 'ACME/Games/Old/Gone', [0, 0, 20], { tokens: 20, costUsd: 0.2, devices: 1, activeDays: 1 }, { tokens: 0, costUsd: 0, devices: 0, activeDays: 0 }],
+        ['Ann Lee', 'ACME/Aurora', [0, 600, 300], { tokens: 300, costUsd: 3, devices: 1, activeDays: 2 }, { tokens: 200, costUsd: 2, devices: 1, activeDays: 1 }],
+        ['Bo', 'ACME/Aurora', [0, 300, 40], { tokens: 40, costUsd: 0.4, devices: 1, activeDays: 1 }, { tokens: 300, costUsd: 3, devices: 1, activeDays: 1 }],
+        ['Cy', 'ACME/Old', [0, 0, 20], { tokens: 20, costUsd: 0.2, devices: 1, activeDays: 1 }, { tokens: 0, costUsd: 0, devices: 0, activeDays: 0 }],
         [null, null, [0, 0, 70], { tokens: 70, costUsd: 0.7, devices: 1, activeDays: 1 }, { tokens: 0, costUsd: 0, devices: 0, activeDays: 0 }]
       ]);
       // The devices whose usage nobody is charged with, for the admin.
@@ -386,15 +389,15 @@ for (const backend of BACKENDS) {
       // 使用人數 and 活躍裝置 one by one: the focus's people and devices, as
       // many as focusTotals counts, with employee nos. for the admin.
       assert.deepEqual(w.active.employees.map((e) => [e.id, e.name, e.unit && e.unit.path.join('/'), e.focus]), [
-        ['ACME-1', 'Ann Lee', 'ACME/Games/Aurora/Ember Team', { tokens: 300, costUsd: 3, devices: 1, activeDays: 2 }],
-        ['ACME-2', 'Bo', 'ACME/Games/Aurora/3D Team', { tokens: 40, costUsd: 0.4, devices: 1, activeDays: 1 }],
-        ['ACME-3', 'Cy', 'ACME/Games/Old/Gone', { tokens: 20, costUsd: 0.2, devices: 1, activeDays: 1 }]
+        ['ACME-1', 'Ann Lee', 'ACME/Aurora', { tokens: 300, costUsd: 3, devices: 1, activeDays: 2 }],
+        ['ACME-2', 'Bo', 'ACME/Aurora', { tokens: 40, costUsd: 0.4, devices: 1, activeDays: 1 }],
+        ['ACME-3', 'Cy', 'ACME/Old', { tokens: 20, costUsd: 0.2, devices: 1, activeDays: 1 }]
       ]);
       assert.deepEqual(w.active.devices, [
-        { id: 'dev-a', hostname: 'DEV-A', deleted: false, employee: { id: 'ACME-1', name: 'Ann Lee' }, unit: { id: 'ACME/Games/Aurora/Ember Team', name: 'Ember Team', path: ['ACME', 'Games', 'Aurora', 'Ember Team'] }, focus: { tokens: 300, costUsd: 3, activeDays: 2 } },
+        { id: 'dev-a', hostname: 'DEV-A', deleted: false, employee: { id: 'ACME-1', name: 'Ann Lee' }, unit: { id: 'ACME/Games/Aurora', name: 'Aurora', path: ['ACME', 'Aurora'] }, focus: { tokens: 300, costUsd: 3, activeDays: 2 } },
         { id: 'dev-u', hostname: 'DEV-U', deleted: false, employee: null, unit: null, focus: { tokens: 70, costUsd: 0.7, activeDays: 1 } },
-        { id: 'dev-z', hostname: 'DEV-Z', deleted: false, employee: { id: 'ACME-2', name: 'Bo' }, unit: { id: 'ACME/Games/Aurora/3D Team', name: '3D Team', path: ['ACME', 'Games', 'Aurora', '3D Team'] }, focus: { tokens: 40, costUsd: 0.4, activeDays: 1 } },
-        { id: 'dev-g', hostname: 'DEV-G', deleted: false, employee: { id: 'ACME-3', name: 'Cy' }, unit: { id: 'ACME/Games/Old/Gone', name: 'Gone', path: ['ACME', 'Games', 'Old', 'Gone'] }, focus: { tokens: 20, costUsd: 0.2, activeDays: 1 } }
+        { id: 'dev-z', hostname: 'DEV-Z', deleted: false, employee: { id: 'ACME-2', name: 'Bo' }, unit: { id: 'ACME/Games/Aurora', name: 'Aurora', path: ['ACME', 'Aurora'] }, focus: { tokens: 40, costUsd: 0.4, activeDays: 1 } },
+        { id: 'dev-g', hostname: 'DEV-G', deleted: false, employee: { id: 'ACME-3', name: 'Cy' }, unit: { id: 'ACME/Games/Old', name: 'Old', path: ['ACME', 'Old'] }, focus: { tokens: 20, costUsd: 0.2, activeDays: 1 } }
       ]);
       assert.deepEqual([w.active.employees.length, w.active.devices.length], [w.focusTotals.employees, w.focusTotals.devices]);
       // Models and tools: the focus's, as before, each with its comparison
@@ -525,14 +528,15 @@ for (const backend of BACKENDS) {
       assert.equal(longest.status, 200, 'a range of 400 days');
       assert.deepEqual([longest.body.previous.from, longest.body.previous.to, longest.body.previous.days], ['2023-11-28', '2024-12-31', 400]);
 
-      // Levels: the retired team counts while usage is charged to it.
-      const old = await ask(`org=${encodeURIComponent('ACME/Games/Old')}&${WEEK}`, {});
-      assert.deepEqual([old.body.level, old.body.levels], ['team', ['team']]);
+      // Levels: teams are not offered, but the retired team still counts
+      // while usage is charged to it when asked for.
+      const old = await ask(`org=${encodeURIComponent('ACME/Games/Old')}&level=team&${WEEK}`, {});
+      assert.deepEqual([old.body.level, old.body.levels], ['team', []]);
       assert.deepEqual(old.body.units.map((u) => [u.name, u.active, u.focus.tokens]), [['Gone', false, 20]]);
       const oldQuiet = await ask(`org=${encodeURIComponent('ACME/Games/Old')}&from=2026-08-20&to=2026-08-20`, {});
       assert.deepEqual([oldQuiet.body.level, oldQuiet.body.levels, oldQuiet.body.units], [null, [], []], 'no active unit, no usage: nothing to compare');
-      const at = await ask(`org=ACME&${WEEK}`, CLIENT);
-      assert.deepEqual([at.body.level, at.body.levels], ['bu', ['bu', 'department', 'team']]);
+      const at = await ask(`org=ACME&level=bu&${WEEK}`, CLIENT);
+      assert.deepEqual([at.body.level, at.body.levels], ['bu', ['department']]);
       assert.deepEqual(at.body.units.map((u) => [u.name, u.focus.tokens, u.previous.tokens]), [['Games', 360, 500]]);
       assert.deepEqual(at.body.other.focus, figures(0, 0, 0, 0), 'dev-u is in no company');
 
@@ -544,7 +548,7 @@ for (const backend of BACKENDS) {
       assert.deepEqual([a.other.tokens, a.other.focus], [[0, 0, 0], figures(0, 0, 0, 0)]);
       assert.deepEqual(a.employee, {
         id: 'ACME-1', name: 'Ann Lee', email: 'ann@example.test', active: true,
-        unit: { id: 'ACME/Games/Aurora/Ember Team', name: 'Ember Team', path: ['ACME', 'Games', 'Aurora', 'Ember Team'] }
+        unit: { id: 'ACME/Games/Aurora', name: 'Aurora', path: ['ACME', 'Aurora'] }
       });
       assert.deepEqual(a.users.map((u) => [u.id, u.focus.tokens, u.previous.tokens]), [['ACME-1', 300, 200]]);
       assert.deepEqual(a.devices, [{ id: 'dev-a', hostname: 'DEV-A', deleted: false, focus: { tokens: 300, costUsd: 3, activeDays: 2 }, previous: { tokens: 200, costUsd: 2, activeDays: 1 }, trend: { tokens: [0, 600, 300], costUsd: [0, 6, 3] } }]);
@@ -803,7 +807,8 @@ test('an account is charged with its tools on the devices holding it; two on one
     ['other', null, false, true, [], ['d1', 'd3'], [['claude', 9], ['amp', 3]], 12, 0]
   ]);
   assert.deepEqual(accounts[0].who, ['Su@co.test']);
-  assert.deepEqual(accounts[0].unit, { id: 'CO/B', name: 'B', path: ['CO', 'B'] });
+  // A BU is not shown: a device in one shows as in its company.
+  assert.deepEqual(accounts[0].unit, { id: 'CO', name: 'CO', path: ['CO'] });
   assert.deepEqual(accounts[0].focus, { tokens: 140, costUsd: 1.4, devices: 1, activeDays: 1 });
   assert.equal(accounts[3].unit, null);
   // Each provider's share of an account, for 依工具: one email on Claude and
