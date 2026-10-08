@@ -265,8 +265,14 @@ footer{color:var(--muted); font-size:13px; margin-top:24px}
   </div>
 </header>
 
+<div id="leadPreset">
 <p class="lead" lang="zh-Hant">Token Monitor 統計這台電腦上 AI 工具（Claude Code、Codex、Cursor…）的用量，回報給公司的 hub。裝好打開後，它會自己連上公司的 hub，<b>不用輸入任何設定</b>，之後開機也會自動啟動。</p>
 <p class="lead" lang="en">Token Monitor counts how much the AI tools on this computer (Claude Code, Codex, Cursor…) are used and reports it to the company hub. Once installed and opened, it connects to the company hub by itself, <b>with nothing to set up</b>, and starts by itself every time you turn on the computer.</p>
+</div>
+<div id="leadKeyless" hidden>
+<p class="lead" lang="zh-Hant">Token Monitor 統計這台電腦上 AI 工具（Claude Code、Codex、Cursor…）的用量，回報給公司的 hub。裝好打開後，<b>要填一次公司 hub 的網址與金鑰</b>（見最後的「連上公司的 hub」），之後開機也會自動啟動。</p>
+<p class="lead" lang="en">Token Monitor counts how much the AI tools on this computer (Claude Code, Codex, Cursor…) are used and reports it to the company hub. Once installed and opened, <b>enter the company hub's address and key once</b> (see "Connect to the company hub" below), and it starts by itself every time you turn on the computer.</p>
+</div>
 
 <div class="tabs" role="tablist" id="osTabs" aria-label="作業系統" hidden>
   <button type="button" role="tab" id="tab-windows" data-os="windows" aria-controls="os-windows" aria-selected="false">Windows</button>
@@ -745,6 +751,21 @@ footer{color:var(--muted); font-size:13px; margin-top:24px}
   </ol>
 </section>
 
+<section id="connectHub" hidden>
+  <h2 lang="zh-Hant">連上公司的 hub</h2>
+  <h2 lang="en">Connect to the company hub</h2>
+  <p lang="zh-Hant">這個安裝檔不帶公司的設定，裝好後要自己填一次：</p>
+  <p lang="en">This installer carries no company settings, so fill them in once after installing:</p>
+  <ol>
+    <li lang="zh-Hant">打開 Token Monitor，按右下角的 ⚙，打開「多裝置同步」，選「連接到 Hub」。</li>
+    <li lang="en">Open Token Monitor, click ⚙ at the bottom right, open "Multi-device Sync" and choose "Connect to a hub".</li>
+    <li lang="zh-Hant">Hub URL 填這一台 hub 的網址：<div class="cmd"><pre id="hubUrl"></pre></div></li>
+    <li lang="en">For Hub URL, enter this hub's address:<div class="cmd"><pre id="hubUrlEn"></pre></div></li>
+    <li lang="zh-Hant">密鑰填 client 金鑰：向 Token Monitor 的管理者索取。</li>
+    <li lang="en">For Secret, enter the client key: ask your Token Monitor administrator for it.</li>
+  </ol>
+</section>
+
 <section>
   <h2 lang="zh-Hant">已經裝了舊版？</h2>
   <h2 lang="en">Already have an older version?</h2>
@@ -771,7 +792,8 @@ footer{color:var(--muted); font-size:13px; margin-top:24px}
 // A page anyone who can reach the hub may open, like the dashboard: it holds
 // no secret and no data, only steps. The hub injects window.TM_SETTINGS
 // (hub/server.js pageSettings): the GitLab Releases page and, when that is
-// one, the fixed link to each platform's newest installer.
+// one, the fixed link to each platform's newest installer; or a GitHub
+// Releases page, whose installers carry no hub (keyless).
 
 const $ = (id) => document.getElementById(id);
 
@@ -877,6 +899,20 @@ function applyLinks(settings) {
     $('allLink').hidden = false;
   }
   $('noLinks').hidden = any;
+  applyKeyless(Boolean(s.keyless));
+}
+
+// Installers from a public GitHub Release carry no hub URL or key
+// (hub/server.js pageSettings keyless): the page says so and shows the step
+// that connects the app to this hub, with this hub's own address.
+function applyKeyless(keyless) {
+  $('leadPreset').hidden = keyless;
+  $('leadKeyless').hidden = !keyless;
+  $('connectHub').hidden = !keyless;
+  if (!keyless) return;
+  const address = new URL('.', location.href).href.replace(/\/$/, '');
+  $('hubUrl').textContent = address;
+  $('hubUrlEn').textContent = address;
 }
 
 // A copy button on each command.

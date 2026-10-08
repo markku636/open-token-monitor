@@ -1510,7 +1510,8 @@ test('the served page carries the download link, and shows no button without one
     assert.ok(match, 'settings script must be injected');
     assert.deepEqual(JSON.parse(match[1]), {
       downloadUrl: DOWNLOAD_URL,
-      downloads: Object.fromEntries(['windows', 'macos', 'linux'].map((os) => [os, `${DOWNLOAD_URL}/permalink/latest/downloads/${os}`]))
+      downloads: Object.fromEntries(['windows', 'macos', 'linux'].map((os) => [os, `${DOWNLOAD_URL}/permalink/latest/downloads/${os}`])),
+      keyless: false
     });
     // The page reveals the button only when the hub sent a link.
     assert.match(html, /<a id="download"[^>]* hidden data-en="Download Token Monitor">/);
@@ -1530,6 +1531,29 @@ test('only an absolute http(s) URL becomes the download link', () => {
     assert.equal(latestDownloads(value), null, String(value));
   }
   assert.equal(pageSettings({}).downloads, null);
+});
+
+// A GitHub Releases page carries installers without a hub
+// (.github/workflows/client-release.yml): the install page then shows how to
+// connect one, with this hub's address. Any other link keeps the "nothing to
+// set up" text.
+test('a GitHub Releases download link makes the install page show how to connect to the hub', () => {
+  const keyless = (value) => pageSettings({ TOKEN_MONITOR_CLIENT_DOWNLOAD_URL: value }).keyless;
+  for (const value of ['https://github.com/example-org/token-monitor/releases', 'https://github.com/example-org/token-monitor/releases/', 'https://github.com/example-org/token-monitor/releases/latest']) {
+    assert.equal(keyless(value), true, value);
+  }
+  for (const value of [undefined, 'https://git.example.test/g/p/-/releases', 'https://github.com/example-org/token-monitor', 'https://github.com/example-org/token-monitor/releases/tag/client-v0.63.1-corp.1', 'https://github.example.test/a/b/releases']) {
+    assert.equal(keyless(value), false, String(value));
+  }
+  assert.equal(pageSettings({ TOKEN_MONITOR_CLIENT_DOWNLOAD_URL: 'https://github.com/example-org/token-monitor/releases' }).downloads, null);
+
+  const page = fs.readFileSync(path.join(__dirname, '..', 'hub', 'install.html'), 'utf8');
+  assert.ok(page.includes('<div id="leadPreset">'));
+  assert.ok(page.includes('<div id="leadKeyless" hidden>'));
+  assert.ok(page.includes('<section id="connectHub" hidden>'));
+  for (const id of ['hubUrl', 'hubUrlEn']) assert.ok(page.includes(`<div class="cmd"><pre id="${id}"></pre></div>`), id);
+  assert.ok(page.includes('applyKeyless(Boolean(s.keyless));'));
+  assert.ok(page.includes('「多裝置同步」，選「連接到 Hub」') && page.includes('"Multi-device Sync" and choose "Connect to a hub"'));
 });
 
 test('every other route still reaches the upstream hub unchanged', async () => {

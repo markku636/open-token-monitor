@@ -106,7 +106,17 @@ function catalogScript() {
 // change takes effect with the next hub restart.
 function pageSettings(env = process.env) {
   const downloadUrl = webUrl(env.TOKEN_MONITOR_CLIENT_DOWNLOAD_URL);
-  return { downloadUrl, downloads: latestDownloads(downloadUrl) };
+  return { downloadUrl, downloads: latestDownloads(downloadUrl), keyless: isGitHubReleases(downloadUrl) };
+}
+
+// Whether the download link is a GitHub repository's Releases page. Installers
+// there are public, so they carry no hub URL or key
+// (.github/workflows/client-release.yml, TM_CLIENT_NO_HUB=1), and the install
+// page adds the step that connects the app to this hub.
+function isGitHubReleases(downloadUrl) {
+  if (!downloadUrl) return false;
+  const url = new URL(downloadUrl);
+  return url.hostname === 'github.com' && /^\/[^/]+\/[^/]+\/releases(?:\/latest)?\/?$/.test(url.pathname);
 }
 
 // Each platform's newest installer, when the download link is a GitLab

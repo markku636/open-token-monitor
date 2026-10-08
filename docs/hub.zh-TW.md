@@ -115,7 +115,7 @@ npm run hub -- --port 17322               # --host、--secret、--staleAfterMs�
 | `TOKEN_MONITOR_CLIENT_SECRETS` | — | client 金鑰，逗號分隔，可以列多把以便輪替。發給使用者在上游用戶端手動輸入。設了這個就必須同時設 `TOKEN_MONITOR_SECRET`。 |
 | `TOKEN_MONITOR_TRUST_PROXY` | 關 | 放在反向代理後面時設為 `1`，稽核改記 `X-Forwarded-For` 的最後一個值。 |
 | `TOKEN_MONITOR_PUBLIC_DASHBOARD` | 關 | 設為 `1` 時，dashboard 不用金鑰就能看統計與用量分析：不帶金鑰的 `GET /api/stats`、`/api/custom/org` 與 `/api/custom/usage` 回 200（用量分析只在使用人數與活躍裝置的明細列出姓名與主機名稱，不含 email 與員工編號），其他路由照舊要金鑰。管理員區塊與個人用量仍要按「管理員」登入。 |
-| `TOKEN_MONITOR_CLIENT_DOWNLOAD_URL` | — | dashboard 標題列「下載 Token Monitor」按鈕的連結，通常設成公司版用戶端的 GitLab Releases 頁（例如 `https://gitlab.example.com/<group>/<project>/-/releases`，`.env.example` 有範例）。沒有設定，或不是 `http://`、`https://` 開頭的完整網址時不顯示按鈕（後者開機時會警告）。改了要重新啟動 hub。 |
+| `TOKEN_MONITOR_CLIENT_DOWNLOAD_URL` | — | dashboard 標題列「下載 Token Monitor」按鈕的連結，通常設成公司版用戶端的 GitLab Releases 頁（例如 `https://gitlab.example.com/<group>/<project>/-/releases`，`.env.example` 有範例）。設成 GitHub 的 Releases 頁（`https://github.com/<owner>/<repo>/releases`）時，那裡的安裝檔不帶 hub 與金鑰（[client-build.zh-TW.md](client-build.zh-TW.md)「從 GitHub 發行」），`/install` 會改說「要填一次公司 hub 的網址與金鑰」，並多一段「連上公司的 hub」，列出這台 hub 的網址（可複製）與去哪裡填。沒有設定，或不是 `http://`、`https://` 開頭的完整網址時不顯示按鈕（後者開機時會警告）。改了要重新啟動 hub。 |
 | `TOKEN_MONITOR_DATABASE_URL` | — | PostgreSQL，`postgres://token_monitor:密碼@host:5432/token_monitor`。密碼含特殊字元時要做 URL 編碼；要加密時加 `?sslmode=require`。沒有設定時只用上游的 JSON 檔。見 [postgres.zh-TW.md](postgres.zh-TW.md)。 |
 | `TOKEN_MONITOR_DATABASE_SCHEMA` | `token_monitor` | hub 的 schema。 |
 | `TOKEN_MONITOR_DATABASE_POOL_SIZE` | `4` | |
@@ -136,7 +136,7 @@ npm run hub -- --port 17322               # --host、--secret、--staleAfterMs�
 | `GET /`、`/dashboard`、`/index.html` | 不需要 | dashboard。頁面本身不含 secret 與用量資料。 |
 | `GET /admin` | 不需要 | dashboard 的管理頁：同一個 `hub/dashboard.html`，只顯示「管理」。頁面本身不含 secret 與資料，內容來自 `/api/admin/*` 等路由，要管理員登入才讀得到。 |
 | `GET /llms.txt`、`/llms-full.txt`、`/api/reports/v1/openapi.json` | 不需要 | 報表 API 的英文說明（`hub/apiDocs.js`），給串接的人與 AI agent。純文件，不含資料與 secret；文件裡的網址是請求的 `Host`（`TOKEN_MONITOR_TRUST_PROXY` 時用 `X-Forwarded-Proto` 與 `X-Forwarded-Host`），不是單純的主機名稱或位址時改成 `http://<hub>`。 |
-| `GET /install` | 不需要 | 安裝說明頁（`hub/install.html`）。`TM_SETTINGS.downloads` 是各平台最新一版的固定網址，`TOKEN_MONITOR_CLIENT_DOWNLOAD_URL` 不是 GitLab 的 Releases 頁時為 `null`，頁面改連那個網址本身。 |
+| `GET /install` | 不需要 | 安裝說明頁（`hub/install.html`）。`TM_SETTINGS.downloads` 是各平台最新一版的固定網址，`TOKEN_MONITOR_CLIENT_DOWNLOAD_URL` 不是 GitLab 的 Releases 頁時為 `null`，頁面改連那個網址本身。`TM_SETTINGS.keyless` 在它是 GitHub 的 Releases 頁時為 `true`，頁面多顯示連上 hub 的步驟。 |
 | `GET /usage` | 不需要 | 302 到 dashboard（舊的用量分析頁已經併進 dashboard），查詢字串照帶。 |
 | `/api/health` | 不需要 | 與上游格式相同，回報上游註冊的 `node-hub` build id。 |
 | `POST /api/ingest` | client、admin | 驗證 → 合併 → 寫入資料庫。回應格式與上游相同。 |

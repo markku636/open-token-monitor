@@ -8,6 +8,7 @@ hub 與 Electron 用戶端打包（`X.Y.Z-corp.N`）的功能異動，新的在�
 
 ## 未發行
 
+- `/install`：`TOKEN_MONITOR_CLIENT_DOWNLOAD_URL` 是 GitHub 的 Releases 頁時，頁面改說要填一次 hub 的網址與金鑰，並多一段「連上公司的 hub」，列出這台 hub 的網址（[hub.zh-TW.md](docs/hub.zh-TW.md)「設定」）。
 - 組織名單不再需要人事公告（[hub.zh-TW.md](docs/hub.zh-TW.md)「組織與裝置歸屬」）：
   - 管理頁的「匯入人事公告」改成「組織名單」：輸入公司代碼後直接在網頁上編輯（新增、刪除、從 Excel 貼上多列），預覽差異後儲存。
   - 「下載 Excel」：那家公司目前的名單，新公司是空白範本，欄位是員工編號、姓名、Email、部門；填好拖回來匯入。檔名開頭不是公司代碼時，用輸入的公司。
