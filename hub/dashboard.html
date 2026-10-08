@@ -5398,9 +5398,11 @@ function adminSame(name, parts) {
 
 // A unit's place for a person to read: its path of names, from the page's
 // tree, else the one the admin answer gave.
+// A unit the tree does not have yet (one an import is about to add) by its
+// id, without the '-' that holds the place of a missing BU.
 function adminUnitLabel(id, path) {
   if (!id) return '—';
-  return unitPath(id) || (path && path.length ? path.join(' / ') : id);
+  return unitPath(id) || (path && path.length ? path.join(' / ') : id.split('/').filter((p) => p !== '-').join(' / '));
 }
 
 // ---- 組織名單: a company's roster, edited here or as an Excel file; either
@@ -5663,7 +5665,8 @@ function changeLine(kind, entry) {
   if (kind === 'renamed') return entry.employeeId + L('：', ': ') + entry.from + ' → ' + entry.to;
   if (kind === 'emailChanged') return who(entry) + L('：', ': ') + (entry.from || '—') + ' → ' + entry.to + (entry.onDevices ? L('（舊 email 還在裝置上）', ' (the old email is still on devices)') : '');
   if (kind === 'emailMoved') return L(entry.email + '：' + (entry.fromName || entry.from) + '（' + entry.from + '）→ ' + (entry.name || entry.to) + '（' + entry.to + '）', entry.email + ': ' + (entry.fromName || entry.from) + ' (' + entry.from + ') → ' + (entry.name || entry.to) + ' (' + entry.to + ')');
-  if (kind === 'unitsAdded' || kind === 'unitsDeactivated') return (LEVEL_LABELS[entry.level] || entry.level) + ' ' + entry.id.split('/').filter((p) => p !== '-').join(' / ');
+  // A department as company / department, as everywhere else on the page.
+  if (kind === 'unitsAdded' || kind === 'unitsDeactivated') return (LEVEL_LABELS[entry.level] || entry.level) + ' ' + (entry.level === 'company' ? entry.name : entry.id.split('/')[0] + ' / ' + entry.name);
   if (kind === 'rulesSuperseded') return L(entry.email + ' → 名單上的 ' + who(entry), entry.email + ' → ' + who(entry) + ' on the roster');
   return '';
 }
