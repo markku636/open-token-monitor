@@ -34,6 +34,16 @@ The hub's dashboard, org roster and install guide, with made-up data from `npm r
 
 ![Install guide](docs/images/install.en.png)
 
+**Rust/Tauri client** (`tauri/`): the widget on each employee's computer. These are its preview mode, with made-up data (`cd tauri && npm run dev`, then open it in a browser).
+
+| Widget | Settings |
+|---|---|
+| ![Widget](docs/images/tauri-widget.en.png) | ![Settings](docs/images/tauri-settings.en.png) |
+
+Usage dashboard: today's, this month's and all-time usage, an activity heatmap, trends, and the share of each tool and model.
+
+![The Rust client's usage dashboard](docs/images/tauri-dashboard.en.png)
+
 ## Layout
 
 ```
@@ -81,19 +91,31 @@ Then, depending on what you need:
 
 Each organisation builds its own client installer, because the installer carries your hub's address and client key.
 
-## Keeping up with upstream
+## Updating when upstream releases a new version
 
-`upstream/` is a squashed git subtree of [Javis603/token-monitor](https://github.com/Javis603/token-monitor). Nothing in this repository edits it, and `npm run verify` fails if anything does. Every seam where this repository copies, patches or ports upstream code is either covered by a test or listed in [upstream-touchpoints.json](upstream-touchpoints.json). That keeps upstream updates mechanical, which also makes them a good task for a coding agent.
+This project is built on top of [Javis603/token-monitor](https://github.com/Javis603/token-monitor). Upstream keeps releasing new versions, and we pull them in regularly.
+
+**The rule: not one line of upstream's code is changed here.**
+
+- The `upstream/` folder is a complete, untouched copy of one upstream release. If anyone edits it, `npm run verify` fails.
+- What we add (the hub's database, the dashboard, the company client…) lives outside `upstream/` and plugs into it.
+- Every place where it plugs in is covered by a test or listed in [upstream-touchpoints.json](upstream-touchpoints.json). When upstream changes one of them, a test fails and tells you what to update.
+
+**Doing it yourself, in three commands:**
 
 ```bash
-npm run upstream:status              # pinned release vs. newest upstream release
-npm run upstream:update -- latest    # pull it, run verify, write tmp/upstream-impact.md
-npm run upstream:impact              # checklist: seams, overlay files and tauri/ files the update touches
+npm run upstream:status            # 1. Check: which version we use, and upstream's newest
+npm run upstream:update -- next    # 2. Move up one version: pull it in and run the tests
+npm run upstream:impact            # 3. See the impact: what to check and fix this time
 ```
 
-- **Manual steps:** [AGENTS.md](AGENTS.md), "升級上游". Coding agents (Claude Code, Codex and others) follow that file.
-- **Claude Code:** the repository ships an [`/upstream-update`](.claude/skills/upstream-update/SKILL.md) skill that runs the whole procedure.
-- **On GitHub:** [upstream-watch](.github/workflows/upstream-watch.yml) checks for a new upstream release every Monday and opens a pull request with the impact checklist. Comment `@claude` on that pull request to have Claude finish the update ([claude.yml](.github/workflows/claude.yml); needs a `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` repository secret).
+Move up one version at a time. When every test passes, merge; otherwise fix what step 3 lists. The full steps are in [docs/upstream-upgrade.zh-TW.md](docs/upstream-upgrade.zh-TW.md) and [AGENTS.md](AGENTS.md) ("升級上游").
+
+**Letting an AI do it:**
+
+- **GitHub reminds you:** [upstream-watch](.github/workflows/upstream-watch.yml) checks upstream every Monday and opens a pull request with a checklist when there's a new version.
+- **Comment `@claude` on that pull request:** Claude follows the steps above and finishes the update ([claude.yml](.github/workflows/claude.yml)). The repository needs a `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` secret first.
+- **Locally in Claude Code:** type [`/upstream-update`](.claude/skills/upstream-update/SKILL.md) to run the whole procedure.
 
 ## Development
 

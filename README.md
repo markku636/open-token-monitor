@@ -37,6 +37,16 @@ hub 的用量 dashboard、組織名單與安裝說明。資料是 `npm run smoke
 
 ![安裝說明](docs/images/install.zh-TW.png)
 
+**Rust/Tauri 用戶端**（`tauri/`）：員工電腦上的小工具。下面是它的預覽模式，用的是假資料（`cd tauri && npm run dev`，再用瀏覽器開）。
+
+| 小工具 | 設定 |
+|---|---|
+| ![小工具](docs/images/tauri-widget.zh-TW.png) | ![設定](docs/images/tauri-settings.zh-TW.png) |
+
+用量儀表板：今日、本月與全部的用量，活動熱度圖、趨勢，以及各工具、各模型的占比。
+
+![Rust 用戶端的用量儀表板](docs/images/tauri-dashboard.zh-TW.png)
+
 ## 快速開始
 
 需要 Node.js 22.15 以上；用容器跑 hub 時另外需要 Docker。
@@ -74,21 +84,31 @@ docker compose -f docker/compose.yml --env-file .env up -d   # hub + PostgreSQL�
 
 安裝檔帶著 hub 網址與 client 金鑰，所以每個組織要自己打包用戶端。
 
-## 跟上上游
+## 上游出新版時怎麼更新
 
-`upstream/` 是 [Javis603/token-monitor](https://github.com/Javis603/token-monitor) 的 git subtree（`--squash`），本 repo 從不修改它；有人改了，`npm run verify` 就會失敗。本 repo 每一處複製、修補或移植上游程式的地方，不是有測試守著，就是列在 [upstream-touchpoints.json](upstream-touchpoints.json)。所以升級上游可以照固定步驟做，很適合交給 AI。
+本專案建立在上游 [Javis603/token-monitor](https://github.com/Javis603/token-monitor) 之上。上游會持續出新版，我們要定期把新版拉進來。
+
+**原則：上游的程式碼一行都不改。**
+
+- `upstream/` 資料夾是上游某一版的完整複本，原封不動。有人改了它，`npm run verify` 就會失敗。
+- 我們自己加的功能（hub 的資料庫、dashboard、公司版用戶端……）都寫在 `upstream/` 外面，再接到上游上。
+- 接到上游的每一個地方都有測試守著，或列在 [upstream-touchpoints.json](upstream-touchpoints.json)。上游改到這些地方時，測試會失敗，告訴你哪裡要跟著改。
+
+**自己升級，三個指令：**
 
 ```bash
-npm run upstream:status              # 目前釘住的版本與上游最新版
-npm run upstream:update -- latest    # 拉最新版、跑 verify、寫出 tmp/upstream-impact.md
-npm run upstream:impact              # 這次更新碰到的接縫、overlay 檔案與 tauri/ 檔案清單
+npm run upstream:status            # 1. 看版本：目前用哪一版、上游最新是哪一版
+npm run upstream:update -- next    # 2. 升一版：拉進下一版，並自動跑測試
+npm run upstream:impact            # 3. 看影響：列出這次要檢查與修改的地方
 ```
 
-- **手動步驟**：寫在 [AGENTS.md](AGENTS.md)「升級上游」。Claude Code、Codex 等 coding agent 都會照這份檔案做。
-- **Claude Code**：repo 附了 [`/upstream-update`](.claude/skills/upstream-update/SKILL.md) skill，一次跑完整個流程。
-- **GitHub**：
-  - [upstream-watch](.github/workflows/upstream-watch.yml) 每週一檢查上游，有新版就開 PR，內文附檢查清單。
-  - 在那個 PR 留言 `@claude`，Claude 就會接手完成升級（[claude.yml](.github/workflows/claude.yml)）。這需要在 repo 設定 `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY` secret。
+一次只升一版。測試全部通過就可以合併；沒通過就照第 3 步的清單修。完整步驟見 [docs/upstream-upgrade.zh-TW.md](docs/upstream-upgrade.zh-TW.md) 與 [AGENTS.md](AGENTS.md)「升級上游」。
+
+**交給 AI 做：**
+
+- **GitHub 自動提醒**：[upstream-watch](.github/workflows/upstream-watch.yml) 每週一檢查上游，有新版就自動開一個 PR，裡面附檢查清單。
+- **在 PR 留言 `@claude`**：Claude 會照上面的步驟完成升級（[claude.yml](.github/workflows/claude.yml)）。repo 要先設定 `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY` secret。
+- **在本機用 Claude Code**：輸入 [`/upstream-update`](.claude/skills/upstream-update/SKILL.md)，一次跑完整個流程。
 
 ## 開發
 
