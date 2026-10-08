@@ -298,7 +298,8 @@ try {
         $env:TAURI_SIGNING_PRIVATE_KEY = $signingKey
     }
     Write-Step "tauri build（第一次會編譯 release，需要數分鐘）"
-    & npm @buildArgs
+    # npm.cmd，不用 npm：npm 11 的 npm.ps1 從 $MyInvocation.Line 重新解析參數，splatting（@buildArgs）會被解析壞。
+    & npm.cmd @buildArgs
     Assert-LastExit "tauri build"
     Remove-Item Env:TM_HUB_URL -ErrorAction SilentlyContinue
     Remove-Item Env:TM_CLIENT_SECRET -ErrorAction SilentlyContinue

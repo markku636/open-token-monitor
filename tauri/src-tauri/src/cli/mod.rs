@@ -310,8 +310,9 @@ pub fn normalize_args(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> 
     let has_subcommand = out.iter().any(|a| SUBCOMMANDS.contains(&a.as_str()));
     let only_meta = out
         .iter()
-        .all(|a| matches!(a.as_str(), "--help" | "-h" | "--version" | "-V"));
-    if !has_subcommand && !(only_meta && !out.is_empty()) {
+        .all(|a| matches!(a.as_str(), "--help" | "-h" | "--version" | "-V"))
+        && !out.is_empty();
+    if !has_subcommand && !only_meta {
         out.insert(0, if once { "once" } else { "run" }.to_string());
     }
     if out.first().map(String::as_str) == Some("once") {

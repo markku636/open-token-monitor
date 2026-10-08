@@ -2,6 +2,7 @@
 
 ## 未發佈 — M3
 
+- 打包修正：`build-installer.ps1` 改用 `npm.cmd` 執行 `tauri build`（npm 11 的 `npm.ps1` 會把 splatting 的參數解析成 `pm`）；`package-lock.json` 補上 vitest 的 esbuild 0.28.2 平台套件（原本標成 extraneous，npm 11 的 `npm ci` 會拒絕）；配合 Rust 1.96 的 clippy 簡化 `tm-agent` 參數判斷。
 - 已知差異：廠商圖示、遮罩與介面主題照 2026-09-24 的上游 main 移植，還沒跟上 v0.63.1 的 `vendorPresentation`／`rowIconMasks.js` 重構；相容測試裡對照這些的六項暫時標成 todo（[architecture.md](docs/architecture.md)「v1 與上游的已知差異」）。
 - 動態效果（上游 Reduce Motion 與資料動畫）：總數從舊值數到新值（1 秒，切換期間 0.8 秒；啟動時從 0 數上來），清單的長條與數字跟著變化、排名變動時整列滑動，切換檢視時長條從零長出；主頁的活動模組進入時熱力圖由左到右淡入、趨勢線畫出，熱力圖可拖曳捲動、滑過時有聚光與提示；趨勢視圖的期間長條長出，點長條開啟用量儀表板；儀表板的趨勢區重新顯示熱力圖與趨勢線（視窗有焦點時才淡入），每日用量圖與工具、模型長條也有動畫。視窗看不到時先不畫，打開時才從上次看到的數字動過去。設定頁「一般」的「減少動態效果」可選跟隨系統、開啟或關閉。新設定：`reduceMotion`（`system` / `on` / `off`，預設 `system`），與上游同名。
 - 主頁（上游 Home）：widget 預設打開主頁，依序顯示額度、模型與活動（熱力圖＋最近 45 天趨勢），設定頁新的「主畫面」可打開工具與裝置模組、調整順序與隱藏、選主頁額度的提供者與顯示帳號數；點模組跳到對應視圖並可「返回主頁」。視圖切換改成底欄的循環按鈕（點一下換下一個，長按、右鍵或滑到箭頭打開選單），可調整視圖順序與隱藏；服務狀態移出額度分頁成為獨立的「狀態」視圖，與上游一樣預設隱藏（要看時在設定頁「主畫面」打開）。熱力圖與趨勢線從趨勢分頁搬到主頁的活動模組，趨勢視圖只留依期間的長條與統計；熱力圖依 token 或成本上色改成設定（原本選 token 的會自動沿用）。新設定：`viewDisplayOrder`、`hiddenViews`（預設 `status`）、`homeModuleOrder`、`hiddenHomeModules`（預設 `tool,device`）、`showHomeLimitBars`、`showHomeLimitProviderNames`、`homeLimitProviderOrder`、`hiddenHomeLimitProviders`、`homeLimitAccountCount`（預設 3）、`homeActiveDaysWindow`（預設 `all`）、`heatmapMetric`（預設 `cost`），與上游同名。
