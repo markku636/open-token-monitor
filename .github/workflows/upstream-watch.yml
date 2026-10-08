@@ -90,6 +90,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.88
         if: steps.status.outputs.pull == 'true'
+      # keyring's Secret Service backend (Linux) links libdbus through pkg-config.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+        if: steps.status.outputs.pull == 'true'
       - name: Rust client compat
         id: compat
         if: steps.status.outputs.pull == 'true'
