@@ -1074,10 +1074,12 @@ test('the Release links, checks and lists the installers under the names the bui
 test('the GitHub Release builds installers without a hub, from client-v tags only, under the names the build gives them', () => {
   const workflow = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'client-release.yml'), 'utf8');
   const notes = fs.readFileSync(path.join(ROOT, 'packaging', 'client-release-notes.github.md'), 'utf8');
-  assert.ok(workflow.includes("on:\n  push:\n    tags: ['client-v*']\n"), 'only a client-v tag starts it');
+  assert.ok(workflow.includes("on:\n  push:\n    tags: ['client-v*']\n  workflow_dispatch:\n"), 'a client-v tag, or a run by hand');
   assert.ok(workflow.includes("      TM_CLIENT_NO_HUB: '1'\n"));
   assert.ok(workflow.includes('      TM_CLIENT_UPDATE_GITHUB_REPO: ${{ github.repository }}\n'));
-  assert.ok(workflow.includes('      TM_CLIENT_VERSION: ${{ github.ref_name }}\n'));
+  // A run by hand builds X.Y.Z-corp.0 and creates no Release.
+  assert.ok(workflow.includes("      TM_CLIENT_VERSION: ${{ startsWith(github.ref, 'refs/tags/client-v') && github.ref_name || '' }}\n"));
+  assert.match(workflow, /^ {2}release:\n(?: {4}.*\n)*? {4}if: startsWith\(github\.ref, 'refs\/tags\/client-v'\)\n/m);
   // Nothing that could put a key or the hub into a public installer.
   assert.doesNotMatch(workflow, /TM_CLIENT_SECRET|TM_CLIENT_HUB_URL|TOKEN_MONITOR_SECRET|secrets\.|set -x/);
   assert.match(workflow, /^ {2}build:\n[\s\S]*?^ {4}needs: verify$/m, 'the builds wait for verify');

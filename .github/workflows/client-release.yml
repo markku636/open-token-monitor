@@ -5,11 +5,14 @@ name: Client release
 # (docs/client-build.zh-TW.md, "從 GitHub 發行"). The repository is public, so
 # the installers carry no hub URL and no client key (TM_CLIENT_NO_HUB=1): the
 # user enters both in Settings. Installed apps update from this repository's
-# latest Release (TM_CLIENT_UPDATE_GITHUB_REPO).
+# latest Release (TM_CLIENT_UPDATE_GITHUB_REPO). Run by hand (Actions → Client
+# release → Run workflow), it builds an X.Y.Z-corp.0 trial of each platform as
+# artifacts and creates no Release.
 
 on:
   push:
     tags: ['client-v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -52,7 +55,8 @@ jobs:
       # update source with a hub URL or client key.
       TM_CLIENT_NO_HUB: '1'
       TM_CLIENT_UPDATE_GITHUB_REPO: ${{ github.repository }}
-      TM_CLIENT_VERSION: ${{ github.ref_name }}
+      # The tag's version; a run by hand builds X.Y.Z-corp.0.
+      TM_CLIENT_VERSION: ${{ startsWith(github.ref, 'refs/tags/client-v') && github.ref_name || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -78,6 +82,7 @@ jobs:
   release:
     name: release
     needs: build
+    if: startsWith(github.ref, 'refs/tags/client-v')
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -334,6 +334,7 @@
   ```
 
   workflow 在 GitHub 的 **Actions → Client release**，完成後在 **Releases** 看得到。
+- **不發版、只試打包**：在 **Actions → Client release → Run workflow** 手動執行，打出 `<上游版本>-corp.0` 的三個平台安裝檔放在 artifacts，不建立 Release。推 tag 之前先這樣跑一次，確認三個平台都打得出來：推出去的 tag 不能刪也不能重用。
 - 同一個 tag 也推到 GitLab 時，GitLab 另外打出帶金鑰的公司版。兩邊的版本號共用同一組 N。
 
 ## 自動更新
