@@ -2,6 +2,7 @@
 
 ## 未發佈 — M3
 
+- 最低 Rust 版本改成 1.88（`Cargo.toml` 的 `rust-version` 與 CI）：鎖定的相依（darling 0.24、image 0.25.10、time 0.3.55 等）需要 1.88，CI 原本釘在 1.85 而編不過。
 - 打包修正：`build-installer.ps1` 改用 `npm.cmd` 執行 `tauri build`（npm 11 的 `npm.ps1` 會把 splatting 的參數解析成 `pm`）；`package-lock.json` 補上 vitest 的 esbuild 0.28.2 平台套件（原本標成 extraneous，npm 11 的 `npm ci` 會拒絕）；配合 Rust 1.96 的 clippy 簡化 `tm-agent` 參數判斷。
 - 已知差異：廠商圖示、遮罩與介面主題照 2026-09-24 的上游 main 移植，還沒跟上 v0.63.1 的 `vendorPresentation`／`rowIconMasks.js` 重構；相容測試裡對照這些的六項暫時標成 todo（[architecture.md](docs/architecture.md)「v1 與上游的已知差異」）。
 - 動態效果（上游 Reduce Motion 與資料動畫）：總數從舊值數到新值（1 秒，切換期間 0.8 秒；啟動時從 0 數上來），清單的長條與數字跟著變化、排名變動時整列滑動，切換檢視時長條從零長出；主頁的活動模組進入時熱力圖由左到右淡入、趨勢線畫出，熱力圖可拖曳捲動、滑過時有聚光與提示；趨勢視圖的期間長條長出，點長條開啟用量儀表板；儀表板的趨勢區重新顯示熱力圖與趨勢線（視窗有焦點時才淡入），每日用量圖與工具、模型長條也有動畫。視窗看不到時先不畫，打開時才從上次看到的數字動過去。設定頁「一般」的「減少動態效果」可選跟隨系統、開啟或關閉。新設定：`reduceMotion`（`system` / `on` / `off`，預設 `system`），與上游同名。

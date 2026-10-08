@@ -51,7 +51,7 @@ jobs:
   tauri-core:
     name: tauri core (Rust)
     runs-on: ubuntu-latest
-    container: rust:1.85
+    container: rust:1.88
     defaults:
       run:
         working-directory: tauri
@@ -85,7 +85,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             tauri/package-lock.json
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: tauri/src-tauri

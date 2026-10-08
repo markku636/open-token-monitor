@@ -30,7 +30,7 @@ Cursor 的同步會把桌面版的登入 token 寫進 tokscale 的帳號檔（`~
 
 ## 開發
 
-需要 Node 22+、Rust 1.85+（MSVC toolchain）、WebView2（Windows 11 內建）。
+需要 Node 22+、Rust 1.88+（MSVC toolchain）、WebView2（Windows 11 內建）。
 
 ```powershell
 npm install

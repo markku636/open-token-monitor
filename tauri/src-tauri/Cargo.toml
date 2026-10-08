@@ -3,7 +3,7 @@ name = "token-monitor"
 version = "0.1.0"
 description = "Token Monitor employee client (Tauri 2 + Rust)"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 publish = false
 # 兩個 binary（GUI: token-monitor / CLI: tm-agent）。明確指定 GUI 為預設主程式，
 # 否則 `tauri build` 在多 binary 間可能選錯、誤把 CLI 打包成主程式。
