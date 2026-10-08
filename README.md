@@ -12,6 +12,22 @@ Upstream Token Monitor is a desktop widget with an optional hub. This repository
 
 The docs are in Traditional Chinese.
 
+## Screenshots
+
+The hub's dashboard, admin page and install guide, with made-up data from `npm run smoke:hub`.
+
+**Usage dashboard:** totals compared with the previous period, trends, model mix and usage by company, filtered by period, tool and organisation unit.
+
+![Usage dashboard](docs/images/dashboard-overview.en.png)
+
+| Accounts | Devices and AI tool limits |
+|---|---|
+| ![Account ranking](docs/images/dashboard-accounts.en.png) | ![Devices](docs/images/dashboard-devices.en.png) |
+
+| Admin: HR announcement import | Install guide (`/install`) |
+|---|---|
+| ![Admin](docs/images/admin.en.png) | ![Install guide](docs/images/install.en.png) |
+
 ## Layout
 
 ```
@@ -30,10 +46,14 @@ Requires Node.js 22.15 or newer, plus Docker for the containerised hub.
 git clone https://github.com/markku636/open-token-monitor.git
 cd open-token-monitor
 npm ci
-cp .env.example .env          # set TOKEN_MONITOR_SECRET, TOKEN_MONITOR_CLIENT_SECRETS, POSTGRES_PASSWORD …
+cp .env.example .env          # set TOKEN_MONITOR_SECRET, TOKEN_MONITOR_CLIENT_SECRETS, POSTGRES_PASSWORD, TOKEN_MONITOR_DB_PASSWORD
+docker build -f docker/Dockerfile -t token-monitor-hub .     # the Compose file never pulls the hub image
 docker compose -f docker/compose.yml --env-file .env up -d   # hub + PostgreSQL on port 80
 # or, for development against the JSON store: npm run hub
+# or, to look around with made-up data and no Docker: npm run smoke:hub
 ```
+
+Make each key and password a long random hex value: `node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"`. Then open <http://localhost/>, choose **Admin** and paste `TOKEN_MONITOR_SECRET`. If port 80 is taken, set `TOKEN_MONITOR_HOST_PORT` in `.env`.
 
 Then, depending on what you need:
 

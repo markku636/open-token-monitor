@@ -15,6 +15,22 @@
 - **Electron 用戶端打包**（`client/`、`packaging/`）：上游的桌面 app，打包時預填你的 hub 網址與 client 金鑰。第一次開啟就會連上 hub、每 30 分鐘上傳一次，並設定開機自動啟動。
 - **Rust/Tauri 用戶端**（`tauri/`）：用 Rust 寫的輕量用戶端。它上傳的內容和上游用戶端逐欄相同，另外提供不需要畫面的 `tm-agent`。
 
+## 畫面
+
+hub 的用量 dashboard、管理頁與安裝說明。資料是 `npm run smoke:hub` 產生的假資料。
+
+**用量 dashboard**：總量與上期比較、趨勢、模型分布與各公司用量，可以依期間、工具與組織單位篩選。
+
+![用量 dashboard](docs/images/dashboard-overview.zh-TW.png)
+
+| 帳號排行 | 裝置與 AI 工具額度 |
+|---|---|
+| ![帳號排行](docs/images/dashboard-accounts.zh-TW.png) | ![裝置](docs/images/dashboard-devices.zh-TW.png) |
+
+| 管理：匯入人事公告 | 安裝說明（`/install`） |
+|---|---|
+| ![管理](docs/images/admin.zh-TW.png) | ![安裝說明](docs/images/install.zh-TW.png) |
+
 ## 快速開始
 
 需要 Node.js 22.15 以上；用容器跑 hub 時另外需要 Docker。
@@ -23,10 +39,14 @@
 git clone https://github.com/markku636/open-token-monitor.git
 cd open-token-monitor
 npm ci
-cp .env.example .env          # 填 TOKEN_MONITOR_SECRET、TOKEN_MONITOR_CLIENT_SECRETS、POSTGRES_PASSWORD……
+cp .env.example .env          # 填 TOKEN_MONITOR_SECRET、TOKEN_MONITOR_CLIENT_SECRETS、POSTGRES_PASSWORD、TOKEN_MONITOR_DB_PASSWORD
+docker build -f docker/Dockerfile -t token-monitor-hub .     # Compose 不會自己拉 hub 映像
 docker compose -f docker/compose.yml --env-file .env up -d   # hub + PostgreSQL，port 80
 # 開發時也可以用 JSON 檔：npm run hub
+# 不用 Docker、先用假資料看看：npm run smoke:hub
 ```
+
+金鑰與密碼都用長的隨機 hex：`node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"`。接著開 <http://localhost/>，按「管理員」貼上 `TOKEN_MONITOR_SECRET`。port 80 被佔用時，在 `.env` 設 `TOKEN_MONITOR_HOST_PORT`。
 
 接下來看你要做什麼：
 
