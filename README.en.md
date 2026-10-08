@@ -6,7 +6,7 @@ A self-hosted team edition of [Token Monitor](https://github.com/Javis603/token-
 
 Upstream Token Monitor is a desktop widget with an optional hub. This repository keeps upstream unchanged and adds what a company deployment needs on top of it:
 
-- **Hub overlay** (`hub/`): PostgreSQL storage, admin, client and API-token permission tiers, organisation import from HR spreadsheets, automatic device ownership, a dashboard that groups usage by company → department (a team counts in its department), a reporting API, backups and history purging. It runs in front of upstream's own hub.
+- **Hub overlay** (`hub/`): PostgreSQL storage, admin, client and API-token permission tiers, an org roster (employee no., name, email, department) edited on the web page or imported from an Excel template, automatic device ownership by email, a dashboard that groups usage by company → department (a team counts in its department), a reporting API, backups and history purging. It runs in front of upstream's own hub.
 - **Electron client packaging** (`client/`, `packaging/`): upstream's desktop app, packaged with your hub URL and client key preset. On first run it connects to your hub, uploads every 30 minutes and turns on launch at login.
 - **Rust/Tauri client** (`tauri/`): a lighter client written in Rust. It uploads exactly what upstream's client uploads, field for field, and also has a headless `tm-agent`.
 
@@ -24,7 +24,7 @@ The hub's dashboard, admin page and install guide, with made-up data from `npm r
 |---|---|
 | ![Account ranking](docs/images/dashboard-accounts.en.png) | ![Devices](docs/images/dashboard-devices.en.png) |
 
-| Admin: HR announcement import | Install guide (`/install`) |
+| Admin: org roster | Install guide (`/install`) |
 |---|---|
 | ![Admin](docs/images/admin.en.png) | ![Install guide](docs/images/install.en.png) |
 

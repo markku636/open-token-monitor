@@ -111,7 +111,7 @@ SOP, section 6:
    - Start `node scripts/smoke-hub.js --host 127.0.0.1` in the background. Run node directly, not through npm: stopping the background task may stop only npm and leave the hub running. `--host 127.0.0.1` avoids a firewall prompt; leave it out when a test machine must reach it.
    - The keys are in `tmp/smoke-hub.env`. They are test keys and fine to use, but keep them out of the report.
    - Check with `curl`: `/api/health`, `/api/custom/health` (admin and client key), the pages, an API token created and used on a reports API route, and GET and write calls with the client key on every route upstream added.
-   - A headless browser screenshot can confirm the dashboard renders with data; list the interactive checks (filters, `/admin` login, import preview) for the user to tick.
+   - A headless browser screenshot can confirm the dashboard renders with data; list the interactive checks (filters, `/admin` login, the org roster editor and Excel download, import preview) for the user to tick.
    - When done, stop it and make sure nothing listens on port 17399 any more (`netstat -ano | grep :17399` on Windows, `lsof -i :17399` elsewhere). If something does, stop only that PID; never kill processes by name, they may belong to another session.
 3. **Client smoke**: for the last release, whenever a client release follows.
    - `npm run smoke:hub` stays up without `--host`, so the test machine can reach it.

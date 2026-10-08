@@ -157,7 +157,7 @@ git diff <from> <to> -- <上游路徑>     # 報告最後一行有兩個 squash 
   | `core.test.js`、`hubOverlayBootstrap.test.js`、`stream.test.js`、`persistentHub.test.js` | overlay 和上游 hub 的接縫、PostgreSQL 版 hub 的行為與回應格式、`/api/stats` 快取與串流 |
   | `access.test.js`、`defects.test.js`、`ingestCoalescing.test.js` | 三把金鑰的權限、上傳驗證、同一台裝置上傳合併 |
   | `persistenceStore.test.js`、`persistenceCapture.test.js`、`purge.test.js`、`backups.test.js` | 資料庫 schema 與寫入、刪除歷史資料、內建備份 |
-  | `org.test.js`、`orgImport.test.js`、`xlsx.test.js` | 人事公告匯入、組織樹、裝置自動歸屬、手動歸類 email |
+  | `org.test.js`、`orgImport.test.js`、`orgRoster.test.js`、`xlsx.test.js` | 名單匯入（人事公告、Excel 範本、網頁編輯）、組織樹、裝置自動歸屬、手動歸類 email |
   | `usage.test.js`、`periods.test.js`、`hubDashboard.test.js`、`sessions.test.js` | dashboard 的用量與比較、日週月區間、頁面不含 secret 與中英文、管理員登入 |
   | `reports.test.js`、`analytics.test.js`、`apiTokens.test.js`、`apiDocs.test.js` | 報表 API、API token 與 scope、`/llms.txt` 與 OpenAPI |
   | `clientBuild.test.js`、`ownDeviceView.test.js` | 公司版用戶端：預設連 hub、開機啟動與最小化、保持在工作列上方、系統匣 logo、自己的圖示、主機名稱、GitLab 更新來源與 releases 連結、只顯示這台電腦 |
@@ -185,7 +185,7 @@ npm run smoke:hub
 
 - [ ] `GET /api/health` 回 200；`GET /api/custom/health` 用 admin 金鑰時 `hub.upstreamVersion` 是新版，用 client 金鑰是 403。
 - [ ] `/` dashboard：區間切換、組織篩選、比較、帳號與裝置、AI 工具額度都有資料，中英文切換正常（[hub.zh-TW.md](hub.zh-TW.md#dashboard)「Dashboard」）。
-- [ ] `/admin`：用 admin 金鑰登入；人事公告匯入預覽（用 `tests/helpers/xlsx.js` 的 `announcement()` 產生的合成名單，絕不用 `docs/dept/` 的真實名單）、API token 建立與撤銷（[hub.zh-TW.md](hub.zh-TW.md#管理員登入)「管理員登入」「每月匯入人事公告」「API token」）。
+- [ ] `/admin`：用 admin 金鑰登入；組織名單：「編輯名單」改一列後預覽、「下載 Excel」能用 Excel 開，人事公告匯入預覽（用 `tests/helpers/xlsx.js` 的 `announcement()` 產生的合成名單，絕不用 `docs/dept/` 的真實名單）、API token 建立與撤銷（[hub.zh-TW.md](hub.zh-TW.md#管理員登入)「管理員登入」「更新名單」「API token」）。
 - [ ] `/install` 與 `/llms.txt` 打得開。
 - [ ] 用剛建立的 API token 呼叫一個報表 API，例如 `GET /api/reports/v1/devices`（[reports-api.zh-TW.md](reports-api.zh-TW.md)）。
 - [ ] 影響報告裡上游新增的路由，用 client 金鑰打：寫入（POST、PUT、DELETE）要被拒絕（403）；讀取（GET）client 金鑰讀得到，確認回傳的內容可以公開，或已經照第 5 節的決定擋掉。

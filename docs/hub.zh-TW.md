@@ -34,7 +34,7 @@ open-token-monitor\
 | `hub/reports.js`、`admin.js` | 報表 API 與組織管理 API。說明見 [reports-api.zh-TW.md](reports-api.zh-TW.md)。 |
 | `hub/analytics.js` | 報表 API 裡 scope `analytics:read` 的端點：組織樹、員工清單、AI 帳號的額度視窗與用量分析。用量分析由 `usage.js` 算，這裡逐欄組成 v1 的固定格式，dashboard 的格式變了也不影響串接方。 |
 | `hub/apiDocs.js`、`openapi.js`、`llms.txt`、`llms-full.txt` | 報表 API 的英文說明：`/llms.txt`、`/llms-full.txt` 與 OpenAPI 3.1（`/api/reports/v1/openapi.json`），不需要金鑰，網址填入對方連到 hub 用的網址。三份文件與 [reports-api.zh-TW.md](reports-api.zh-TW.md) 要一起改，`tests/apiDocs.test.js` 會檢查每個端點、scope 與錯誤代碼都寫到了，`tests/analytics.test.js` 檢查回應的每個欄位都在 OpenAPI 裡。 |
-| `hub/org.js`、`xlsx.js`、`units.js` | 匯入各公司的人事公告 xlsx，建立「公司 → BU → 部門 → 團隊」，自動替裝置指定員工，並提供 dashboard 的組織篩選（畫面只分公司與部門）。`units.js` 是各模組共用的組織樹（層級、往上找某一層的單位、畫面上顯示的單位）。見下方「組織與裝置歸屬」。 |
+| `hub/org.js`、`xlsx.js`、`units.js` | 各公司的組織名單（網頁上編輯，或 Excel 範本與人事公告 xlsx 匯入），建立「公司 → BU → 部門 → 團隊」，自動替裝置指定員工，並提供 dashboard 的組織篩選（畫面只分公司與部門）。`units.js` 是各模組共用的組織樹（層級、往上找某一層的單位、畫面上顯示的單位）。見下方「組織與裝置歸屬」。 |
 | `hub/router.js` | 把一層處理器插在既有 request listener 前面的共用工具。 |
 | `hub/usage.js`、`periods.js` | dashboard 的用量資料（`/api/custom/usage`）：區間切成日、ISO 週或月，範圍內某一層單位的比較、「其他」、這一期有用量的人與裝置、每個人（只給管理員）與趨勢。`periods.js` 是日、週、月的算法，報表也用它。見下方「Dashboard」。 |
 | `hub/install.html` | 安裝說明頁 `/install`：Windows、macOS、Linux 三個分頁，打開時選好訪客的系統，下載按鈕連到各平台最新一版。Windows 與 macOS 的每一步旁邊畫著那一步的視窗（Windows：檔案總管、SmartScreen、安裝程式；macOS：dmg、Finder、「未打開」對話框、系統設定、「要打開嗎？」對話框），要按的地方用橘色框圈起來；圖是 HTML 畫的，不是截圖。整頁有繁體中文與英文，英文版畫的是英文版 Windows 與 macOS 的視窗（見「安裝用戶端」）。和 dashboard 一樣公開、不含任何 secret 或資料。 |
@@ -149,8 +149,11 @@ npm run hub -- --port 17322               # --host、--secret、--staleAfterMs�
 | `GET /api/custom/usage?org=&from=&to=&granularity=&level=&focus=&employee=&other=&compare=&cfrom=&cto=&client=&unowned=` | 同上 | dashboard 的用量資料：一個單位（不帶 `org` 是全部公司）在區間內，依 `granularity`（`day`、`week`、`month`）切成一段段，每段的合計、`level` 那一層每個單位的用量、「其他」與模型、工具。`other=<層級>` 只算這個單位裡不在任何一個該層單位的用量（單位比較的「其他」），沒有更細的單位可以比、沒有名單人數，`level` 不看，回應的 `otherLevel` 是這個層級；層級不在單位底下時 400 `bad_other`。`unowned=1` 只算當天沒有算給任何員工的用量（員工用量的「沒有對應到員工」），可以和 `org`、`other` 一起用；同樣沒有更細的單位、沒有名單人數，`level` 不看，回應的 `unowned` 是 `true`，給 admin 金鑰的 `devices` 附每台裝置的 `trend`（和單一員工的檢視一樣）；值不是 1 時 400 `bad_unowned`，單一員工的檢視不理會它。`focus=last`（預設）看最後一段，`focus=range` 看整個區間。`previous` 是比較期間：`last` 和前一期的同一段比（還沒過完的一期比前一期同樣的天數，日是和上週同一天比），`range` 和緊接在前、一樣長的天數比。`compare=year` 改和去年同期比：日與週往前 52 週（星期幾對齊，例如 2026-09-28 那一週對 2025-09-29 那一週），月與整個區間用去年的同一個日期（2/29 對 2/28）；`compare=custom&cfrom=&cto=` 和自訂的一段比，最多 400 天、不能晚於今天、不能和這一期重疊，否則 400 `bad_compare`。`previous.mode` 是 `previous`、`year` 或 `custom`。`earliest` 是整個 hub 最早有每日用量的那天（`daily`）與最早有每月合計的月份（`monthly`）。`granularity=month` 時，一台裝置在範圍或比較期間裡完整的一個月沒有任何每日資料，就改用那個月的每月合計（和報表的月報一樣，歸屬以月初為準，不算有用量的天數），`monthlyFallback` 列出用到的月份。`client=<工具>`（例如 `claude`、`codex`，1–64 個可見字元，否則 400 `bad_client`）只算那個工具：每日的列改讀依工具的表，所以合計、單位、「其他」、人、帳號、趨勢與活躍名單都只是那個工具的用量；模型的用量沒有記錄是哪個工具，所以 `models` 是空的。回應的 `client` 是篩選的工具（沒有時 `null`），`tools` 一律列出所有工具這一期的用量與比較期間的數字，給選單用。沒有 `client=` 也不是單一員工時，每個單位與「其他」多了 `clients`：各工具這一期與比較期間的用量（只有工具代號與數字，每個人都拿得到），給管理員的 `users` 也有同樣的 `clients`。區間最多 400 天，比較期間也是。每個單位、「其他」、模型與工具都附這一期與比較期間的數字；只在比較期間或區間其他時候用過的模型、工具放在 `idle`。`composition` 是這一期 token 的組成（只算有組成資料的用量）。`employee=` 是單一員工的用量，只給 admin 金鑰，其他人一律 403 `names_admin_only`（不論員工存不存在）；不存在的員工 404。`active` 是這一期有用量的員工與裝置（姓名、主機名稱、裝置 ID、單位與用量，裝置附當時的使用者），每個人都拿得到，其中的員工編號只給 admin 金鑰。`accounts`（帳號排行）也是每個人都拿得到，有 AI 帳號的 email、主機名稱與裝置 ID，但沒有員工與員工編號。其餘的人名、email、員工編號、主機名稱與裝置 ID（`users`、`devices`、`employee`）只給 admin 金鑰。員工姓名一律不含中文名。`accounts` 是每個 AI 帳號（email，沒有時用帳號名稱）在這一期與比較期間的用量、工具與裝置：一台裝置上一個工具的用量，算給這台裝置最後回報的、同一家供應商的帳號；同一家有兩個以上帳號時合成一條 `shared`，沒有帳號的算 `other`；`byProvider` 是一個帳號在各家（`provider`）這一期與比較期間的用量，`other` 沒有；單一員工的檢視沒有 `accounts`。同時計算的請求太多時，不帶 admin 金鑰的請求收到 503 `usage_busy` 與 `Retry-After`。每一個查詢最多 15 秒，超過時回 503 `usage_slow`（[postgres.zh-TW.md](postgres.zh-TW.md)「用量查詢的時間上限」）。見下方「Dashboard」。 |
 | `GET /api/stats?org=<單位 ID>` | 同 `/api/stats` | 只算這個單位與其下所有單位的裝置；不存在的單位回 404。 |
 | `/api/admin/*` | admin | 單位（`/api/admin/units`）、員工與裝置歸屬。`GET /api/admin/employees` 有資料庫時每人多附單位路徑、異動生效日、目前的裝置數與最近 30 天的用量。 |
-| `POST /api/admin/org/import/preview?company=ACME&fileName=` | admin | body 是一家公司的人事公告 xlsx，只回傳匯入會造成的差異，不寫入。見下方「每月匯入人事公告」。 |
+| `POST /api/admin/org/import/preview?company=ACME&fileName=` | admin | body 是一家公司的名單 xlsx（Excel 範本或人事公告），只回傳匯入會造成的差異，不寫入。見下方「更新名單」。 |
 | `POST /api/admin/org/import?company=ACME&fileName=` | admin | 匯入，視為該公司的最新名單。可加 `effectiveFrom`、`confirm=1`、`dropSupersededRules=1`、`keepOldEmails=1`。有警告又沒有 `confirm=1` 時回 409 `needs_confirm`，附上預覽。 |
+| `GET /api/admin/org/roster?company=ACME` | admin | 那家公司目前的名單，`rows` 每列是 `{ employeeId, name, email, department, bu, team }`（沒有的是空字串）。dashboard 的名單編輯器用它。 |
+| `POST /api/admin/org/roster[/preview]?company=ACME` | admin | body 是 `{ "rows": [...] }`（欄位同上，`bu`、`team` 可省略），當作那家公司的完整名單匯入，和 xlsx 走同一套預覽、警告與選項（`effectiveFrom`、`confirm=1`…）。最多 20000 列。 |
+| `GET /api/admin/org/roster.xlsx?company=ACME[&lang=en]` | admin | Excel 範本：工作表「名單」是那家公司目前的名單（新公司只有表頭），欄位是員工編號、姓名、Email、部門，公司有 BU 或團隊時多 BU、團隊兩欄；另有一張「說明」。`lang=en` 改用英文表頭。 |
 | `POST /api/admin/org/reconcile` | admin | 立刻重新指定裝置的員工；平常每 5 分鐘、匯入後、用戶端回報新 email 後與 email 規則改變後會自動執行。 |
 | `/api/admin/emails…` | admin | 手動歸類 email，見下方「手動歸類 email」。 |
 | `GET /api/admin/org/imports[?company=ACME]` | admin | 每家公司最後一次匯入的時間、在職人數、檔案、生效日與變動筆數，超過 35 天沒匯入的標 `overdue`；帶 `company` 時再附那家公司最近 24 次的匯入紀錄（`org_imports`）。 |
@@ -192,9 +195,14 @@ dashboard 不在瀏覽器裡保存金鑰：
 
 ## 組織與裝置歸屬
 
-管理員每月在 dashboard 的「匯入人事公告」區塊上傳各公司的人事公告（可以一次選多個），公司代碼取自檔名開頭，檔名裡的日期是這份名單的日期，例如 `ACME Announcement 20260801.xlsx` 是 `ACME`、2026-08-01。先看差異再匯入，見下方「每月匯入人事公告」。
+每家公司一份**組織名單**：員工編號、姓名、Email、部門。管理員在 dashboard 的「組織名單」區塊維護，有三種方式，結果都一樣，先看差異再匯入（見下方「更新名單」）：
 
-- **只讀這幾欄**：Employee No.、English Name、Chinese Name、Email Address、BU、Department、Team。職等、晉升、Chat ID 等其他欄位與其他工作表都不會讀取或儲存。
+- **網頁上編輯**：輸入公司代碼（例如 `ACME`）按「編輯名單」，直接在表格裡改、新增或刪除；從 Excel 複製多列可以貼到任一格（含表頭那一列會略過）。按「預覽變更」。
+- **Excel 範本**：按「下載 Excel」拿到那家公司目前的名單（新公司是空白範本），填好後拖回框裡。公司代碼取自檔名開頭（範本的檔名是 `ACME 名單.xlsx`）；檔名開頭不是公司代碼時，用上面輸入的公司。
+- **人事公告 xlsx**：有人事公告的公司照舊上傳，檔名開頭是公司代碼，檔名裡的日期是名單的日期，例如 `ACME Announcement 20260801.xlsx` 是 `ACME`、2026-08-01。
+
+- **只讀這幾欄**（中英文表頭都可以）：員工編號（Employee No.）、姓名（Name；或 English Name 加 Chinese Name）、Email（Email Address）、部門（Department），以及選填的 BU、團隊（Team）。職等、晉升、Chat ID 等其他欄位與其他工作表都不會讀取或儲存。
+- 沒有部門的人算公司直屬。網頁上新增或調部門的人，自動帶入那個部門原本的 BU，不會因為網頁沒有 BU 欄而多出一個同名部門；調部門的人離開原本的團隊。
 - **單位**存在 `org_units` 表，是一棵四層的樹：公司 → BU → 部門 → 團隊，每個單位記著自己的層級（`level`）。ID 是名稱路徑：`ACME`、`ACME/Games`、`ACME/Games/Arcade`、`ACME/Games/Arcade/Pixel Team`。
   - 名稱不分大小寫合併。
   - 某一層是 `-` 或空白時跳過那一層：沒有 BU 的部門直接掛在公司下，ID 是 `ACME/-/<部門>`（`-` 佔住 BU 的位置，所以不會和同名的 BU 撞 ID）；沒有部門的人算 BU 直屬；團隊只算在部門底下。
@@ -215,9 +223,9 @@ dashboard 不在瀏覽器裡保存金鑰：
 - **對不到員工、但 email 網域只屬於一家公司的裝置**（例如 `initech.example` 只出現在 INITECH 的名單），在 dashboard 的組織樹與篩選裡先算在那家公司，不分部門；歸屬表的來源顯示「email 網域」。網域取自匯入的名單，兩家公司共用的網域不算；回報的信箱優先，其次是 AI 帳號。這不寫入 `device_owners`，所以報表仍然算未歸屬。
 - 自動指定的區間 `updated_by` 是 `auto:email-assigned`、`auto:reported`、`auto:ai-email` 或 `auto:released`。裝置第一次被指定時，從它最早有用量的那天起算（hub 第一次看到它的那天、最早的每日歷史，或最早的歷史月份的 1 號，取最早的），讓上傳的歷史也有歸屬；之後才上傳的更早歷史，會讓第一段自動區間往前延伸（重新對應結果的 `backdated`）。之後換人從當天起算；**同一位員工換單位**則從人事名單上異動的生效日起算（`employee_placements.effective_from`，見下方），但不早於目前這一段的開始、也不晚於今天。管理員寫的區間不會被移動。沒有新證據時維持原本的歸屬，所以離職員工的裝置仍算他的，直到新使用者的 email 出現在名單上。
 
-### 每月匯入人事公告
+### 更新名單
 
-每家公司每月上傳一次最新的人事公告。dashboard 先送到 `/api/admin/org/import/preview`，列出和目前資料的差異，管理員確認後才匯入：
+名單有變動時（每月或隨時）更新一次。dashboard 先送到預覽（xlsx 是 `/api/admin/org/import/preview`，網頁編輯是 `/api/admin/org/roster/preview`），列出和目前資料的差異，管理員確認後才匯入：
 
 | 差異 | 怎麼判斷 | 匯入後 |
 |---|---|---|
@@ -261,7 +269,7 @@ dashboard 不在瀏覽器裡保存金鑰：
 
 | 資料表 | 記錄什麼 | 誰會讀 |
 |---|---|---|
-| `employee_placements` | 每位員工**目前**所在的單位，一人一列（PK 是 `employee_id`），每次匯入人事公告都直接覆寫，不留歷史。`unit_id` 是最底層的單位：有團隊就是團隊，沒有就是部門，再沒有就是 BU 或公司。`company_id` 是組織樹的根。`effective_from` 是他新進或換到這個單位的生效日。 | 單位的名單人數、自動指定裝置時決定單位與換單位的起日，以及手動指定時單位留空的預設值。 |
+| `employee_placements` | 每位員工**目前**所在的單位，一人一列（PK 是 `employee_id`），每次匯入名單都直接覆寫，不留歷史。`unit_id` 是最底層的單位：有團隊就是團隊，沒有就是部門，再沒有就是 BU 或公司。`company_id` 是組織樹的根。`effective_from` 是他新進或換到這個單位的生效日。 | 單位的名單人數、自動指定裝置時決定單位與換單位的起日，以及手動指定時單位留空的預設值。 |
 | `device_owners` | 每台**裝置**在一段日期（`valid_from`～`valid_to`）歸哪位員工、算給哪個單位（`unit_id`）。歸屬改變時開一段新區間。依部門或團隊規則歸屬的區間沒有員工（`employee_id` 是 NULL）。 | 報表與用量分析。每天的用量算給當天的歸屬，所以員工換單位後，舊的用量仍然留在原本的單位。 |
 
 - 單位的上下層靠 `org_units.parent_unit_id`。要從團隊往上找部門、BU 與公司，就沿著這個欄位走；要找某一層，看 `level`。
@@ -357,7 +365,7 @@ WHERE e.is_active;
 
 **左側列**：登入後 `/admin` 左邊有一排圖示，滑鼠移上去或用 Tab 移進去時展開成文字，移開就收回；按「固定」讓它一直展開（記在瀏覽器的 `tm.railPinned`）。項目依「組織資料」（匯入人事公告、需處理、未歸類 email、部門清單、員工清單）、「對外整合」（API token）與「系統維護」（資料庫備份、刪除歷史資料、用戶端版本）分組，最上面的「回到用量」回到 `/`。一次只顯示一個區塊：網址的 `#importSection` 這類 hash 指定哪一個，沒有或那一區沒顯示時是第一個，所以用量頁的「去歸類」等連結照樣打開那一區。「需處理」、「未歸類 email」與「用戶端版本」旁邊是件數（比 hub 舊的裝置數），收起時變成圖示上的點。手機寬度時改成標題列左邊的 ☰，點了才從左邊滑出。
 
-- **匯入人事公告**：把 xlsx 拖進框裡或選檔案，可以一次多個，按「預覽差異」。每個檔案一張卡片：人數、各種變動的筆數與明細（可以展開）、略過的列、警告；可以改生效日、勾選要不要刪除被取代的規則與保留舊 email，有警告時要勾「我確認要匯入這個檔案」才能按「匯入」。下面列出每家公司最後一次匯入的時間、在職人數、檔案、生效日與上次的變動，超過一個月沒更新的標出來。「重新對應裝置」的結果也列出只到公司與往前延伸的台數。
+- **組織名單**：輸入公司代碼後「編輯名單」直接改（「新增一列」、每列的「刪除」、從 Excel 貼上多列），按「預覽變更」；或「下載 Excel」，填好拖進框裡或選檔案（可以一次多個），按「預覽 Excel」。只有一家公司時代碼會自動帶入。每次預覽一張卡片：人數、各種變動的筆數與明細（可以展開）、略過的列、警告；可以改生效日、勾選要不要刪除被取代的規則與保留舊 email，有警告時要勾「我確認要匯入這個檔案」才能按「匯入」。下面列出每家公司最後一次匯入的時間、在職人數、檔案、生效日與上次的變動，超過一個月沒更新的標出來。「重新對應裝置」的結果也列出只到公司與往前延伸的台數。
 - **需處理**：多位員工 email 的裝置（按員工名字決定這台算誰的，從裝置第一天起算）、離職員工還在回報的裝置、有問題的歸類規則（可以刪除），以及之前手動指定的裝置（「改回自動」）。
 - **未歸類 email**：見上方「手動歸類 email」。每個 email 附原因、裝置、最近 30 天的 token 與成本；選部門後按「歸到這個單位」，或「歸到其他」；勾選多個時，上方出現一次歸類的工具列。選到一半的單位與勾選不會被每分鐘的更新清掉。
 - **部門清單**（展開才載入）：公司 → 部門，每個單位的在職人數、裝置數與最近 30 天的用量（都含底下的團隊）；可以搜尋、顯示已停用的單位，「看員工」跳到員工清單並篩出那個單位。

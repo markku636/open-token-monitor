@@ -9,7 +9,7 @@
 - **hub overlay**（`hub/`）：
   - PostgreSQL 儲存。
   - 管理員、client、API token 三種權限。
-  - 從人事公告 xlsx 匯入組織，並自動判定裝置的主人；dashboard 依「公司 → 部門」兩級篩選與比較，團隊算在所屬部門。
+  - 組織名單（員工編號、姓名、Email、部門）直接在網頁上編輯，或下載 Excel 範本填好再匯入，並依 email 自動判定裝置的主人；dashboard 依「公司 → 部門」兩級篩選與比較。
   - 用量 dashboard、報表 API、備份與刪除歷史資料。
   - 它疊在上游的 hub 前面執行。
 - **Electron 用戶端打包**（`client/`、`packaging/`）：上游的桌面 app，打包時預填你的 hub 網址與 client 金鑰。第一次開啟就會連上 hub、每 30 分鐘上傳一次，並設定開機自動啟動。
@@ -27,7 +27,7 @@ hub 的用量 dashboard、管理頁與安裝說明。資料是 `npm run smoke:hu
 |---|---|
 | ![帳號排行](docs/images/dashboard-accounts.zh-TW.png) | ![裝置](docs/images/dashboard-devices.zh-TW.png) |
 
-| 管理：匯入人事公告 | 安裝說明（`/install`） |
+| 管理：組織名單 | 安裝說明（`/install`） |
 |---|---|
 | ![管理](docs/images/admin.zh-TW.png) | ![安裝說明](docs/images/install.zh-TW.png) |
 

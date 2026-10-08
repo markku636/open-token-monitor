@@ -780,6 +780,17 @@ test('page C3: unit measures and change labels', () => {
   assert.match(script, /\nfunction renderBars\(container, rows, \{ limit, expandKey, empty, scale, noun \}\) \{/);
 });
 
+test('組織名單 sends each row with the BU of its department, and a moved person without their team', () => {
+  const page = pageFns(['rosterRowOut']);
+  const bus = new Map([['hub', 'Platform']]);
+  const row = (more) => Object.assign({ employeeId: 'S1', name: 'Ada', email: 'ada@example.test', department: 'Hub', bu: 'Platform', team: 'Ingest', was: 'Hub' }, more);
+  assert.deepEqual(page.rosterRowOut(row({}), bus), { employeeId: 'S1', name: 'Ada', email: 'ada@example.test', department: 'Hub', bu: 'Platform', team: 'Ingest' }, 'unchanged');
+  assert.deepEqual(page.rosterRowOut(row({ department: ' hub ', bu: '', team: '', was: '' }), bus), { employeeId: 'S1', name: 'Ada', email: 'ada@example.test', department: 'hub', bu: 'Platform', team: '' }, 'new: the BU of its department');
+  assert.deepEqual(page.rosterRowOut(row({ department: 'Sales' }), bus), { employeeId: 'S1', name: 'Ada', email: 'ada@example.test', department: 'Sales', bu: '', team: '' }, 'moved to a new department');
+  assert.deepEqual(page.rosterRowOut(row({ department: '', was: '', team: '' }), bus).bu, 'Platform', 'directly under a BU stays there');
+  assert.deepEqual(page.rosterRowOut(row({ department: '' }), bus).bu, '', 'moved out of the department: directly under the company');
+});
+
 test('page C4: person devices, token split, live state and the admin helpers', () => {
   const page = pageFns(['compParts', 'compNote', 'windowRemain', 'shownWindows', 'durWords', 'limitFigures', 'limitSummary', 'limitGroups', 'clientCounts', 'deviceTools',
     'limitAccounts', 'deviceAccounts', 'accountPlan', 'focusByDevice', 'viewDeviceIds', 'viewAccounts', 'accountUsage', 'deviceOrder', 'deviceStaleAfter', 'deviceStateHint', 'accountWords', 'accountRanking', 'companyOf', 'importPath', 'staffPath', 'reconcileText']);
@@ -1018,7 +1029,7 @@ test('page C4: person devices, token split, live state and the admin helpers', (
 
   // An HR file: its company from the name, and the import route with every
   // part encoded.
-  assert.deepEqual([page.companyOf('ACME Announcement 20260801.xlsx'), page.companyOf('initech list.xlsx'), page.companyOf('名單.xlsx')], ['ACME', 'INITECH', '']);
+  assert.deepEqual([page.companyOf('ACME Announcement 20260801.xlsx'), page.companyOf('initech list.xlsx'), page.companyOf('名單.xlsx'), page.companyOf('名單.xlsx', 'GLOBEX'), page.companyOf('ACME 名單.xlsx', 'GLOBEX')], ['ACME', 'INITECH', '', 'GLOBEX', 'ACME'], 'a name with no code: the company typed in');
   assert.equal(page.importPath({ name: 'ACME Announcement 20260801.xlsx' }, '/preview'),
     '/api/admin/org/import/preview?company=ACME&fileName=ACME%20Announcement%2020260801.xlsx');
   assert.equal(page.importPath({ name: 'GLOBEX a&b.xlsx' }, '', '&confirm=1'), '/api/admin/org/import?company=GLOBEX&fileName=GLOBEX%20a%26b.xlsx&confirm=1');

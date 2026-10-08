@@ -10,7 +10,12 @@
 //   POST /api/admin/owners/:deviceId/release  (a hand-made owner back to automatic)
 //   POST /api/admin/org/import/preview?company=ACME&fileName=  (what an import would change)
 //   POST /api/admin/org/import?company=ACME&fileName=&effectiveFrom=&confirm=1
-//        &dropSupersededRules=1&keepOldEmails=1  (an HR announcement .xlsx, org.js)
+//        &dropSupersededRules=1&keepOldEmails=1  (a roster .xlsx, org.js)
+//   GET  /api/admin/org/roster?company=ACME     (the company's roster, to edit)
+//   POST /api/admin/org/roster[/preview]?company=ACME&…  { rows } (the edited
+//        roster, with the import's options)
+//   GET  /api/admin/org/roster.xlsx?company=ACME[&lang=en]  (the Excel template,
+//        with the company's roster in it)
 //   POST /api/admin/org/reconcile           (assign devices to employees now)
 //   GET  /api/admin/org/devices             (where each device counts, and why,
 //                                            and its first day)
@@ -153,6 +158,22 @@ async function assignOwner(runner, body, actor, now = () => Date.now()) {
   return { deviceId, validFrom, replaced: false };
 }
 
+// An import's options from its query string; /preview only compares.
+function importOptions(url, extra, actor) {
+  const q = url.searchParams;
+  const yes = (name) => ['1', 'true', 'yes'].includes(String(q.get(name) || '').toLowerCase());
+  return {
+    company: q.get('company'),
+    fileName: q.get('fileName'),
+    effectiveFrom: q.get('effectiveFrom'),
+    dryRun: extra === 'preview',
+    confirm: yes('confirm'),
+    dropSupersededRules: yes('dropSupersededRules'),
+    keepOldEmails: yes('keepOldEmails'),
+    actor
+  };
+}
+
 // `org` (org.js) answers /api/admin/org/*, and hears about every ownership
 // change so its dashboard index follows manual assignments at once.
 function createAdmin({ store = null, now = () => Date.now(), org = null, apiTokens = null, backups = null, purge = null } = {}) {
@@ -291,23 +312,37 @@ function createAdmin({ store = null, now = () => Date.now(), org = null, apiToke
       ownersChanged();
       return sendJson(res, 200, { ok: true, deviceId: id, validFrom: extra });
     }
-    // One company's HR announcement workbook, as that company's latest list.
-    // With /preview, only what importing it would change.
+    // One company's roster workbook, as that company's latest list. With
+    // /preview, only what importing it would change.
     if (resource === 'org' && id === 'import' && (!extra || extra === 'preview') && method === 'POST') {
       if (!org) throw new AdminError(503, 'store_unavailable', 'org import needs a database');
       const workbook = await readBody(req, org.maxWorkbookBytes, 'workbook');
-      const q = url.searchParams;
-      const yes = (name) => ['1', 'true', 'yes'].includes(String(q.get(name) || '').toLowerCase());
-      return sendJson(res, 200, { ok: true, ...(await org.importCompany(workbook, {
-        company: q.get('company'),
-        fileName: q.get('fileName'),
-        effectiveFrom: q.get('effectiveFrom'),
-        dryRun: extra === 'preview',
-        confirm: yes('confirm'),
-        dropSupersededRules: yes('dropSupersededRules'),
-        keepOldEmails: yes('keepOldEmails'),
-        actor
-      })) });
+      return sendJson(res, 200, { ok: true, ...(await org.importCompany(workbook, importOptions(url, extra, actor))) });
+    }
+    // The roster an admin edits on the dashboard: the company's as it is, and
+    // the edited one back, imported as a workbook would be.
+    if (resource === 'org' && id === 'roster' && !extra && method === 'GET') {
+      if (!org) throw new AdminError(503, 'store_unavailable', 'org data needs a database');
+      return sendJson(res, 200, { ok: true, ...(await org.companyRoster(url.searchParams.get('company'))) });
+    }
+    if (resource === 'org' && id === 'roster' && (!extra || extra === 'preview') && method === 'POST') {
+      if (!org) throw new AdminError(503, 'store_unavailable', 'org import needs a database');
+      const body = await readJsonBody(req, org.maxWorkbookBytes);
+      return sendJson(res, 200, { ok: true, ...(await org.importRoster(body && body.rows, importOptions(url, extra, actor))) });
+    }
+    if (resource === 'org' && id === 'roster.xlsx' && !extra && method === 'GET') {
+      if (!org) throw new AdminError(503, 'store_unavailable', 'org data needs a database');
+      const lang = url.searchParams.get('lang') === 'en' ? 'en' : 'zh';
+      const { company, workbook } = await org.rosterTemplate(url.searchParams.get('company'), { lang });
+      const fileName = `${company} ${lang === 'en' ? 'roster' : '名單'}.xlsx`;
+      res.writeHead(200, {
+        'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'content-disposition': `attachment; filename="${company}-roster.xlsx"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        'content-length': String(workbook.length),
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff'
+      });
+      return res.end(workbook);
     }
     if (resource === 'org' && org && method === 'GET') {
       if (id === 'units' && !extra) return sendJson(res, 200, { ok: true, units: await org.unitStats() });

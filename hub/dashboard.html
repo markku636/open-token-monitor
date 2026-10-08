@@ -346,6 +346,8 @@ button.dev-name[aria-expanded="true"]::before{content:'▾'}
 .drop{display:block; border:1.5px dashed var(--axis); border-radius:12px; padding:22px 16px; text-align:center; color:var(--text2); cursor:pointer; margin-bottom:10px}
 .drop.over{border-color:var(--accent); background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .drop input{display:none}
+#rosterTable td{vertical-align:middle}
+#rosterTable input{width:100%}
 .drop u{color:var(--accent); text-decoration:none; font-weight:500}
 .results{margin:10px 0 0; padding-left:18px; font-size:13px}
 .results li.bad{color:var(--bad)}
@@ -462,7 +464,7 @@ body:not(.rail-pinned) .rail:not(:hover):not(:focus-within) .rail-n{position:abs
   <div class="rail-top"><span class="rail-logo" aria-hidden="true">TM</span><button type="button" class="rail-pin" id="railPin" aria-pressed="false" title="讓選單一直展開" data-en-title="Keep the menu open" data-en="Pin">固定</button></div>
   <a href="./" id="railUsage"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z"/></svg><span class="rail-lbl" data-en="Back to usage">回到用量</span></a>
   <div class="rail-cap" data-en="Organization">組織資料</div>
-  <a href="#importSection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg><span class="rail-lbl" data-en="Import HR announcements">匯入人事公告</span></a>
+  <a href="#importSection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg><span class="rail-lbl" data-en="Org roster">組織名單</span></a>
   <a href="#issueSection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span class="rail-lbl" data-en="Needs attention">需處理</span><span class="rail-n" id="issueSectionCount" hidden></span></a>
   <a href="#emailSection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM4 7l8 6 8-6"/></svg><span class="rail-lbl" data-en="Unassigned emails">未歸類 email</span><span class="rail-n warn" id="emailSectionCount" hidden></span></a>
   <a href="#deptSection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v6M5 21v-6h14v6M12 9H5v6M12 9h7v6"/></svg><span class="rail-lbl" data-en="Unit list">部門清單</span></a>
@@ -676,19 +678,36 @@ body:not(.rail-pinned) .rail:not(:hover):not(:focus-within) .rail-n{position:abs
   <h2 class="group" data-en="Administration">管理</h2>
 
   <section id="importSection">
-    <h3><span data-en="Import HR announcements">匯入人事公告</span> <span class="hint" data-en="Once a month, one xlsx per company. The file name starts with the company code, and the date in it is the effective date (ACME Announcement 20260801.xlsx → ACME, 2026-08-01)">每月一次，每家公司一個 xlsx；檔名開頭是公司代碼，檔名裡的日期是生效日（ACME Announcement 20260801.xlsx → ACME，2026-08-01）</span></h3>
+    <h3><span data-en="Org roster">組織名單</span> <span class="hint" data-en="One roster per company: employee no., name, email and department. Edit it here, or download the Excel, fill it in and drop it below.">每家公司一份名單：員工編號、姓名、Email、部門。直接在這裡編輯，或下載 Excel 填好後拖到下面。</span></h3>
+    <div class="bar">
+      <label class="check"><span data-en="Company">公司</span> <input id="rosterCompany" list="rosterCompanies" placeholder="公司代碼，例如 ACME" aria-label="公司代碼" data-en-placeholder="Company code, e.g. ACME" data-en-aria-label="Company code" size="18" autocomplete="off" spellcheck="false"></label>
+      <datalist id="rosterCompanies"></datalist>
+      <button id="rosterOpen" type="button" data-en="Edit roster">編輯名單</button>
+      <button id="rosterDownload" class="ghost" type="button" data-en="Download Excel">下載 Excel</button>
+      <span class="note" id="rosterNote" role="status"></span>
+    </div>
+    <div id="rosterEditor" hidden>
+      <div class="scroll tall"><table id="rosterTable"></table></div>
+      <datalist id="rosterDepartments"></datalist>
+      <div class="bar">
+        <button id="rosterAdd" class="ghost" type="button" data-en="Add a row">新增一列</button>
+        <button id="rosterPreview" type="button" data-en="Preview changes">預覽變更</button>
+        <button id="rosterClose" class="ghost" type="button" data-en="Close">關閉</button>
+        <span class="note" data-en="Rows copied from Excel can be pasted into any cell. People in no department count directly under the company.">從 Excel 複製多列，可以直接貼到任一格。沒有部門的人算公司直屬。</span>
+      </div>
+    </div>
     <label class="drop" id="dropZone">
       <input type="file" id="orgFiles" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple>
-      <span id="dropText"><span lang="zh-Hant">把人事公告拖到這裡，或<u>選擇檔案</u>（可以一次選多個）</span><span lang="en">Drop HR announcements here, or <u>choose files</u> (several at once is fine)</span></span>
+      <span id="dropText"><span lang="zh-Hant">把填好的 Excel 拖到這裡，或<u>選擇檔案</u>（檔名開頭是公司代碼，例如 ACME 名單.xlsx）</span><span lang="en">Drop a filled-in Excel here, or <u>choose files</u> (the file name starts with the company code, e.g. ACME roster.xlsx)</span></span>
     </label>
     <div class="bar">
-      <button id="orgPreview" type="button" disabled data-en="Preview changes">預覽差異</button>
+      <button id="orgPreview" type="button" disabled data-en="Preview the Excel">預覽 Excel</button>
       <button id="orgReconcile" class="ghost" type="button" data-en="Re-match devices">重新對應裝置</button>
     </div>
     <div id="previews"></div>
     <ul class="results" id="orgResults"></ul>
     <div class="scroll" id="imports"></div>
-    <p class="note" data-en="Each import is that company's latest roster: employees and units not on it are deactivated, not deleted. Only employee ID, name, email, BU, department and team are read; the dashboard shows companies and departments, with a team counted in its department and BUs left out. Preview the changes before you import. A file older than the last one, one that would deactivate 30% or more of the people, or one whose emails are mostly another company's domain needs a tick to confirm before it imports. Owners follow the emails on the roster; only those not found there use the manual assignments below.">每次匯入都是那家公司的最新名單：名單上沒有的員工與單位會停用，不會刪除。只讀員工編號、姓名、email、BU、部門與團隊；畫面只分公司與部門，團隊算在所屬部門，BU 不顯示。先看差異再匯入；檔案比上次舊、會停用三成以上的人、或 email 大多是別家公司的網域時，要勾選確認才能匯入。歸屬以名單上的 email 為準，找不到的才用下面的手動歸類。</p>
+    <p class="note" data-en="Each save or import is that company's whole roster: people and departments not on it are deactivated, not deleted. Preview the changes first; one that would deactivate 30% or more of the people, or whose emails are mostly another company's domain, needs a tick to confirm. Devices go to people by the emails on the roster; only emails not on it use the manual assignments below. An HR announcement xlsx imports too (BU and team columns are kept, but only companies and departments are shown).">每次儲存或匯入都是那家公司的完整名單：名單上沒有的人與部門會停用，不會刪除。先預覽差異再匯入；會停用三成以上的人、或 email 大多是別家公司的網域時，要勾選確認。裝置依名單上的 email 自動歸給員工，名單上沒有的才用下面的手動歸類。人事公告的 xlsx 也能匯入（BU 與團隊欄會保留，畫面只分公司與部門）。</p>
   </section>
 
   <section id="issueSection">
@@ -995,8 +1014,12 @@ let usage = null;
 let stats = null;
 let upstreamVersion = null;
 let pendingFiles = [];
-// Import previews waiting for 匯入: file name → { file, body }.
+// Import previews waiting for 匯入: name → { send(extra, query), body }, where
+// send() posts the same file or roster again (extra '/preview' to compare).
 const previews = new Map();
+// 組織名單 being edited: { company, rows: [{ employeeId, name, email,
+// department, bu, team }] }, or null. BU and team are kept, not shown.
+let roster = null;
 const expanded = new Set();
 // What the people and the accounts search boxes hold: in memory only, never
 // in the URL.
@@ -2799,9 +2822,9 @@ function renderUnitEmpty() {
     box.append(el('div', 'empty', L('「' + usage.scope.name + '」底下沒有更細的單位' + (usage.people ? '，可以在下方「使用者比較」看每個人。' : '。'), 'There are no smaller units under "' + usage.scope.name + '"' + (usage.people ? '. See each person in "User comparison" below.' : '.'))));
     return;
   }
-  const line = el('div', 'empty', L('還沒有匯入人事公告，沒有單位可以比較。', 'No HR announcement has been imported yet, so there are no units to compare.'));
+  const line = el('div', 'empty', L('還沒有組織名單，沒有單位可以比較。', 'There is no org roster yet, so there are no units to compare.'));
   if (usage.people) {
-    const link = el('a', '', L('前往匯入', 'Go to import'));
+    const link = el('a', '', L('前往組織名單', 'Go to the org roster'));
     link.href = adminHref('importSection');
     line.append(' ', link);
   }
@@ -5380,7 +5403,156 @@ function adminUnitLabel(id, path) {
   return unitPath(id) || (path && path.length ? path.join(' / ') : id);
 }
 
-// ---- 匯入人事公告: preview, then import
+// ---- 組織名單: a company's roster, edited here or as an Excel file; either
+// is previewed, then imported
+
+const ROSTER_COLUMNS = [
+  ['employeeId', L('員工編號', 'Employee No.')], ['name', L('姓名', 'Name')], ['email', 'Email'], ['department', L('部門', 'Department')]
+];
+const COMPANY_CODE = /^[A-Za-z0-9][A-Za-z0-9-]{0,31}$/;
+
+function rosterCompany() {
+  return $('rosterCompany').value.trim().toUpperCase();
+}
+
+function blankRosterRow() {
+  return { employeeId: '', name: '', email: '', department: '', bu: '', team: '', was: '' };
+}
+
+// The company typed in, or '' with a note saying what is wrong.
+function checkedCompany() {
+  const company = rosterCompany();
+  if (COMPANY_CODE.test(company)) return company;
+  $('rosterNote').textContent = L('請先輸入公司代碼（英文字母、數字與 -，例如 ACME）。', 'Type a company code first (letters, digits and -, e.g. ACME).');
+  return '';
+}
+
+async function openRoster() {
+  const company = checkedCompany();
+  if (!company) return;
+  $('rosterNote').textContent = '';
+  const { status, body } = await request('/api/admin/org/roster?company=' + encodeURIComponent(company));
+  if (status !== 200) {
+    $('rosterNote').textContent = L('無法載入名單：', 'Could not load the roster: ') + ((body && body.message) || status);
+    return;
+  }
+  // Each row remembers the department it came with (its team only holds
+  // there), and each department its BU, which the table does not show.
+  const bus = new Map();
+  for (const row of body.rows) if (row.department && row.bu && !bus.has(row.department.toLowerCase())) bus.set(row.department.toLowerCase(), row.bu);
+  roster = { company, bus, rows: body.rows.length ? body.rows.map((row) => Object.assign({}, row, { was: row.department })) : [blankRosterRow()] };
+  if (!body.rows.length) $('rosterNote').textContent = L(company + ' 還沒有名單，從第一列開始填。', company + ' has no roster yet: start with the first row.');
+  renderRoster();
+}
+
+function closeRoster() {
+  roster = null;
+  $('rosterEditor').hidden = true;
+}
+
+// Rows pasted from Excel (tab-separated, one line a row) fill the table from
+// the cell they are pasted into, adding rows as needed; a header row is left out.
+function pasteRoster(event, rowIndex, columnIndex) {
+  const text = (event.clipboardData && event.clipboardData.getData('text/plain')) || '';
+  if (!/[\t\n]/.test(text.replace(/\s+$/, ''))) return;
+  event.preventDefault();
+  const lines = text.replace(/\r/g, '').replace(/\n+$/, '').split('\n')
+    .filter((line, i) => !(i === 0 && ROSTER_COLUMNS.some(([, label]) => line.split('\t').includes(label))));
+  lines.forEach((line, i) => {
+    while (roster.rows.length <= rowIndex + i) roster.rows.push(blankRosterRow());
+    line.split('\t').forEach((cell, j) => {
+      const column = ROSTER_COLUMNS[columnIndex + j];
+      if (column) roster.rows[rowIndex + i][column[0]] = cell.trim();
+    });
+  });
+  renderRoster();
+}
+
+function renderRoster() {
+  $('rosterEditor').hidden = !roster;
+  if (!roster) return;
+  const departments = new Set(roster.rows.map((row) => row.department).filter(Boolean));
+  for (const unit of unitsAt('department', roster.company)) departments.add(unit.name);
+  $('rosterDepartments').replaceChildren(...[...departments].sort((a, b) => a.localeCompare(b)).map((name) => new Option(name)));
+  const table = $('rosterTable');
+  table.textContent = '';
+  thead(table, [['#', false]].concat(ROSTER_COLUMNS.map(([, label]) => [label, false]), [['', false]]));
+  const body = el('tbody');
+  roster.rows.forEach((row, rowIndex) => {
+    const tr = el('tr');
+    tr.append(el('td', 'num', String(rowIndex + 1)));
+    ROSTER_COLUMNS.forEach(([field, label], columnIndex) => {
+      const input = el('input');
+      input.value = row[field] || '';
+      input.size = field === 'email' ? 26 : 14;
+      if (field === 'email') input.type = 'email';
+      if (field === 'department') input.setAttribute('list', 'rosterDepartments');
+      input.setAttribute('aria-label', label + ' ' + (rowIndex + 1));
+      input.addEventListener('input', () => { row[field] = input.value; });
+      input.addEventListener('paste', (event) => pasteRoster(event, rowIndex, columnIndex));
+      const td = el('td');
+      td.append(input);
+      tr.append(td);
+    });
+    const remove = el('td');
+    remove.append(smallButton(L('刪除', 'Remove'), () => {
+      roster.rows.splice(rowIndex, 1);
+      if (!roster.rows.length) roster.rows.push(blankRosterRow());
+      renderRoster();
+    }));
+    tr.append(remove);
+    body.append(tr);
+  });
+  table.append(body);
+}
+
+// A row as it is sent: a department keeps the BU it is in, so a new or moved
+// person joins that department instead of a new one of the same name, and a
+// person who changed department leaves their team.
+function rosterRowOut(row, bus) {
+  const department = String(row.department || '').trim();
+  const moved = department !== String(row.was || '').trim();
+  const bu = department ? bus.get(department.toLowerCase()) || '' : moved ? '' : row.bu || '';
+  return { employeeId: row.employeeId, name: row.name, email: row.email, department, bu, team: moved ? '' : row.team || '' };
+}
+
+// The edited roster goes through the same preview as a file.
+async function previewRoster() {
+  if (!roster) return;
+  const company = roster.company;
+  const rows = roster.rows.filter((row) => ROSTER_COLUMNS.some(([field]) => String(row[field] || '').trim())).map((row) => rosterRowOut(row, roster.bus));
+  const send = (extra, query) => postJson('/api/admin/org/roster' + extra + '?company=' + encodeURIComponent(company) + (query || ''), 'POST', { rows });
+  const { status, body } = await send('/preview');
+  const name = L('網頁編輯', 'edited here');
+  if (status === 200) {
+    previews.set(company + ' · ' + name, { send, body });
+    $('rosterNote').textContent = L('差異在下方，確認後按「匯入」。', 'The changes are below: press Import to save them.');
+  } else {
+    $('rosterNote').textContent = L('無法預覽：', 'Could not preview: ') + ((body && body.message) || status);
+  }
+  renderPreviews();
+}
+
+// The Excel: the company's roster, or an empty template for a new one.
+async function downloadRoster() {
+  const company = checkedCompany();
+  if (!company) return;
+  const en = document.documentElement.lang === 'en';
+  try {
+    const res = await fetch(HUB_BASE + '/api/admin/org/roster.xlsx?company=' + encodeURIComponent(company) + (en ? '&lang=en' : ''), { headers: authHeaders(), cache: 'no-store' });
+    if (!res.ok) throw new Error(String(res.status));
+    const url = URL.createObjectURL(await res.blob());
+    const link = el('a');
+    link.href = url;
+    link.download = company + L(' 名單', ' roster') + '.xlsx';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    $('rosterNote').textContent = L('無法下載：', 'Could not download: ') + e.message;
+  }
+}
 
 async function refreshImports() {
   const t = adminSeq;
@@ -5389,8 +5561,10 @@ async function refreshImports() {
   const box = $('imports');
   box.textContent = '';
   const list = status === 200 && body.imports ? body.imports : [];
+  $('rosterCompanies').replaceChildren(...list.map((row) => new Option(row.company)));
+  if (list.length === 1 && !$('rosterCompany').value) $('rosterCompany').value = list[0].company;
   if (!list.length) {
-    box.append(el('div', 'empty', L('還沒有匯入過人事公告。', 'No HR announcements imported yet.')));
+    box.append(el('div', 'empty', L('還沒有組織名單。', 'No org roster yet.')));
     return;
   }
   const table = el('table');
@@ -5429,26 +5603,29 @@ function changeSummary(counts) {
   return parts.length ? parts.join(' · ') : L('無變更', 'No changes');
 }
 
-function companyOf(fileName) {
+// The company a file is for: the code its name starts with, else `typed`
+// (the one typed in 組織名單).
+function companyOf(fileName, typed = '') {
   const match = /^([A-Za-z0-9][A-Za-z0-9-]*)/.exec(fileName || '');
-  return match ? match[1].toUpperCase() : '';
+  return match ? match[1].toUpperCase() : typed;
 }
 
 function setPendingFiles(files) {
   pendingFiles = [...files].filter((f) => /\.xlsx$/i.test(f.name));
   $('orgPreview').disabled = !pendingFiles.length;
-  const named = (open, close) => pendingFiles.map((f) => f.name + open + (companyOf(f.name) || '?') + close);
+  const named = (open, close) => pendingFiles.map((f) => f.name + open + (companyOf(f.name, rosterCompany()) || '?') + close);
   $('dropText').textContent = pendingFiles.length
     ? L('要匯入：' + named('（', '）').join('、'), 'To import: ' + named(' (', ')').join(', '))
-    : L('把人事公告拖到這裡，或選擇檔案（可以一次選多個）', 'Drop HR announcements here, or choose files (several at once is fine)');
+    : L('把填好的 Excel 拖到這裡，或選擇檔案（檔名開頭是公司代碼，例如 ACME 名單.xlsx）', 'Drop a filled-in Excel here, or choose files (the file name starts with the company code, e.g. ACME roster.xlsx)');
 }
 
-function importPath(file, extra, query) {
-  return '/api/admin/org/import' + extra + '?company=' + encodeURIComponent(companyOf(file.name)) + '&fileName=' + encodeURIComponent(file.name) + (query || '');
+// `typed`: the company typed in 組織名單, for a file whose name has no code.
+function importPath(file, extra, query, typed = '') {
+  return '/api/admin/org/import' + extra + '?company=' + encodeURIComponent(companyOf(file.name, typed)) + '&fileName=' + encodeURIComponent(file.name) + (query || '');
 }
 
 async function sendWorkbook(file, extra, query) {
-  return request(importPath(file, extra, query), {
+  return request(importPath(file, extra, query, rosterCompany()), {
     method: 'POST',
     headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
     body: await file.arrayBuffer()
@@ -5461,8 +5638,9 @@ async function previewWorkbooks() {
   $('orgResults').textContent = '';
   $('orgPreview').disabled = true;
   for (const file of pendingFiles) {
-    const { status, body } = await sendWorkbook(file, '/preview');
-    if (status === 200) previews.set(file.name, { file, body });
+    const send = (extra, query) => sendWorkbook(file, extra, query);
+    const { status, body } = await send('/preview');
+    if (status === 200) previews.set(file.name, { send, body });
     else $('orgResults').append(el('li', 'bad', L(file.name + '：無法預覽，' + ((body && body.message) || status), 'Could not preview ' + file.name + ': ' + ((body && body.message) || status))));
   }
   setPendingFiles([]);
@@ -5504,7 +5682,7 @@ function renderPreviews() {
     const diff = body.diff || {};
     const warnings = diff.warnings || [];
     const card = el('div', 'preview' + (warnings.length ? ' warn' : ''));
-    card.append(el('h4', '', body.company + ' · ' + name));
+    card.append(el('h4', '', name.startsWith(body.company + ' · ') ? name : body.company + ' · ' + name));
     card.append(el('div', 'hint', L(body.employees + ' 人、' + body.departments + ' 個部門', body.employees + ' ' + plural(body.employees, 'person', 'people') + ', ' + body.departments + ' ' + plural(body.departments, 'department', 'departments'))
       + (body.fileDate ? L(' · 檔案日期 ', ' · file date ') + body.fileDate : '') + L(' · 維持不變 ' + (diff.unchanged || 0) + ' 人', ' · ' + (diff.unchanged || 0) + ' unchanged')));
     for (const w of warnings) card.append(el('div', 'warning', '⚠ ' + (WARNING_TEXT[w.code] ? WARNING_TEXT[w.code](w) : w.code)));
@@ -5578,11 +5756,11 @@ async function importPreviewed(name, opts) {
   if (!entry) return;
   const query = (opts.effectiveFrom ? '&effectiveFrom=' + encodeURIComponent(opts.effectiveFrom) : '')
     + (opts.confirm ? '&confirm=1' : '') + (opts.drop ? '&dropSupersededRules=1' : '') + (opts.keep ? '&keepOldEmails=1' : '');
-  const { status, body } = await sendWorkbook(entry.file, '', query);
+  const { status, body } = await entry.send('', query);
   const results = $('orgResults');
   if (status === 200) {
     previews.delete(name);
-    const summary = changeSummary(Object.fromEntries(CHANGE_LABELS.map(([key]) => [key, ((body.diff && body.diff[key]) || []).length])));
+    const summary = changeSummary(Object.fromEntries(CHANGE_LABELS.map(([key]) => [key, shownChanges(key, body.diff && body.diff[key]).length])));
     const assigned = (body.reconciled && body.reconciled.assigned) || 0;
     const changed = (body.reconciled && body.reconciled.changed) || 0;
     results.append(el('li', '', L(body.company + '：匯入完成，' + summary + '；生效日 ' + body.effectiveFrom + '；自動歸屬 ' + assigned + ' 台、改變 ' + changed + ' 台', body.company + ': imported, ' + summary + '; effective ' + body.effectiveFrom + '; ' + assigned + ' ' + plural(assigned, 'device', 'devices') + ' assigned automatically, ' + changed + ' changed')
@@ -5590,7 +5768,7 @@ async function importPreviewed(name, opts) {
     for (const warning of body.warnings || []) results.append(el('li', '', '　' + warning));
   } else if (status === 409 && body && body.preview) {
     // Something changed since the preview (another import): show it again.
-    previews.set(name, { file: entry.file, body: body.preview });
+    previews.set(name, { send: entry.send, body: body.preview });
     results.append(el('li', 'bad', L(name + '：需要確認後才能匯入。', name + ': needs your confirmation before it is imported.')));
   } else {
     results.append(el('li', 'bad', L(name + '：匯入失敗，' + ((body && body.message) || status), 'Could not import ' + name + ': ' + ((body && body.message) || status))));
@@ -5598,6 +5776,7 @@ async function importPreviewed(name, opts) {
   renderPreviews();
   deptRows = null;
   staffRows = null;
+  if (status === 200 && roster && roster.company === body.company) await openRoster();
   await refreshOrg();
   refreshAdmin();
   loadUsage();
@@ -5903,7 +6082,7 @@ function renderDepts() {
   const departments = shown.filter((u) => u.active && u.level === 'department').length;
   $('deptHint').textContent = L(companies + ' 家公司、' + departments + ' 個部門', companies + ' ' + plural(companies, 'company', 'companies') + ', ' + departments + ' ' + plural(departments, 'department', 'departments'));
   if (!rows.length) {
-    box.replaceChildren(el('div', 'empty', shown.length ? L('沒有符合的單位。', 'No matching units.') : L('還沒有匯入過人事公告。', 'No HR announcements imported yet.')));
+    box.replaceChildren(el('div', 'empty', shown.length ? L('沒有符合的單位。', 'No matching units.') : L('還沒有組織名單。', 'No org roster yet.')));
     return;
   }
   const table = el('table');
@@ -5972,7 +6151,7 @@ function renderStaff() {
   const onRoster = staffRows.filter((e) => e.active).length;
   $('staffHint').textContent = L(onRoster + ' 人在最新名單上', onRoster + ' ' + plural(onRoster, 'person', 'people') + ' on the latest roster') + (rows.length !== staffRows.length ? L('，符合 ' + rows.length + ' 人', ', ' + rows.length + ' matching') : '');
   if (!rows.length) {
-    box.replaceChildren(el('div', 'empty', staffRows.length ? L('沒有符合的員工。', 'No matching employees.') : L('還沒有匯入過人事公告。', 'No HR announcements imported yet.')));
+    box.replaceChildren(el('div', 'empty', staffRows.length ? L('沒有符合的員工。', 'No matching employees.') : L('還沒有組織名單。', 'No org roster yet.')));
     return;
   }
   const table = el('table');
@@ -6763,6 +6942,18 @@ function wire() {
   });
   $('orgFiles').addEventListener('change', () => setPendingFiles($('orgFiles').files));
   $('orgPreview').addEventListener('click', () => previewWorkbooks());
+  $('rosterOpen').addEventListener('click', () => openRoster());
+  $('rosterCompany').addEventListener('keydown', (event) => { if (event.key === 'Enter') openRoster(); });
+  $('rosterCompany').addEventListener('input', () => setPendingFiles(pendingFiles));
+  $('rosterDownload').addEventListener('click', () => downloadRoster());
+  $('rosterAdd').addEventListener('click', () => {
+    roster.rows.push(blankRosterRow());
+    renderRoster();
+    const inputs = $('rosterTable').querySelectorAll('tbody tr:last-child input');
+    if (inputs[0]) inputs[0].focus();
+  });
+  $('rosterPreview').addEventListener('click', () => previewRoster());
+  $('rosterClose').addEventListener('click', () => closeRoster());
   $('orgReconcile').addEventListener('click', () => reconcileNow());
   $('emailBulkGive').addEventListener('click', () => setEmailRules({ unitId: $('emailBulkUnit').value }));
   $('emailBulkOther').addEventListener('click', () => setEmailRules({ other: true }));

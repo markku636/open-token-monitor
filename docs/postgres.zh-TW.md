@@ -139,12 +139,12 @@ schema 採用 PostgreSQL 的慣例，不用 MySQL 的慣例。`tests/persistence
 | 資料表 | 內容 |
 |---|---|
 | `org_units` | 公司 → BU → 部門 → 團隊，一棵樹。`unit_id` 是名稱路徑，`level` 是層級，`parent_unit_id` 指向上一層。 |
-| `employees` | 人事公告的員工。 |
+| `employees` | 組織名單上的員工。 |
 | `employee_placements` | 每位員工目前所在的單位，每次匯入都覆寫；`effective_from` 是新進或換單位的生效日。 |
 | `device_owners` | 每台裝置在一段日期歸哪位員工、算給哪個單位（`valid_from` 起，不含 `valid_to`）。依部門或團隊規則歸屬時 `employee_id` 是 NULL。 |
 | `device_claims` | 用戶端回報的公司信箱。 |
 | `email_assignments` | 管理員替名單上沒有的 email 寫的歸類規則：歸到部門或團隊（`unit_id`）、歸給員工，或「其他」，三者恰好一個。 |
-| `org_imports` | 每次匯入人事公告：公司、檔名、檔案日期、生效日、匯入者與變動摘要（`summary`，jsonb，只有筆數與員工編號）。 |
+| `org_imports` | 每次匯入名單（xlsx 或網頁編輯）：公司、檔名（網頁編輯是 NULL）、檔案日期、生效日、匯入者與變動摘要（`summary`，jsonb，只有筆數、員工編號、單位 ID 與層級）。 |
 | `admin_sessions` | dashboard 管理員的登入 session，只存 token 的 SHA-256 與 admin 金鑰的指紋。 |
 | `api_tokens` | 其他系統讀報表用的 API token，只存 SHA-256。`scopes` 是 `reports:read`、`analytics:read` 的一或兩個。 |
 

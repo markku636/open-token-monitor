@@ -202,4 +202,4 @@ scope `analytics:read`。dashboard 上的用量分析：一個單位（或全部
 
 - 每天凌晨拉前一天的 `usage/daily`；每週一拉上一週的 `usage/weekly`；每月 1 日拉上個月的 `usage/monthly`，各個 `groupBy` 各拉一次。
 - 裝置可能晚幾天才上線補傳，所以結算上個月時，建議在月初第 3–5 天再拉一次，以最後一次為準。
-- `units` 與 `employees` 在每月匯入人事公告時才會變，一天拉一次就夠；`limits` 跟著裝置的上傳（每 30 分鐘）更新。
+- `units` 與 `employees` 只在更新組織名單時才會變，一天拉一次就夠；`limits` 跟著裝置的上傳（每 30 分鐘）更新。

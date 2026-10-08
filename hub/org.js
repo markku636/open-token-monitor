@@ -4,12 +4,15 @@
 // dashboard's company → department filters and comparisons, and the
 // reports by unit, are built on.
 //
-// Import. One HR announcement workbook per company (.xlsx) is that company's
-// latest list. Its units and employees are upserted, and the ones the new list
-// no longer has are marked inactive, never deleted, so ownership history keeps
-// pointing at them. Only identity and placement columns are read (employee
-// no., names, email, BU, department, team); grades, promotion data and every
-// other column never leave the workbook.
+// Import. One roster per company is that company's latest list: an .xlsx
+// (the dashboard's template, or an HR announcement), or the rows an admin
+// edited on the dashboard (importRoster(), the same columns as JSON). Its units
+// and employees are upserted, and the ones the new list no longer has are
+// marked inactive, never deleted, so ownership history keeps pointing at them.
+// Only identity and placement columns are read (employee no., name, email, BU,
+// department, team, in English or Chinese); grades, promotion data and every
+// other column never leave the workbook. The template has four columns
+// (員工編號, 姓名, Email, 部門); BU and team are optional.
 //
 // Units are rows of `org_units`, as a tree, each with its level:
 //   ACME                              company (the code the file name starts with)
@@ -79,7 +82,7 @@
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { AdminError, assignOwner, validDay } = require('./admin');
-const { LIMITS: XLSX_LIMITS, XlsxError, findTable, readWorkbook } = require('./xlsx');
+const { LIMITS: XLSX_LIMITS, XlsxError, findTable, readWorkbook, writeWorkbook } = require('./xlsx');
 const { normalizeOwnerEmail } = require('./ingestGuard');
 const { toDbTime } = require('./persistence/util');
 const { LEVELS, unitTree } = require('./units');
@@ -100,14 +103,28 @@ const RULE_LEVELS = new Set(['department', 'team']);
 // Where a department with no BU keeps its BU's place in its id.
 const NO_BU = '-';
 const COLUMNS = Object.freeze({
-  employeeNo: ['Employee No.', 'Employee No', 'Employee ID'],
-  email: ['Email Address', 'Email'],
-  chineseName: ['Chinese Name'],
-  englishName: ['English Name'],
+  employeeNo: ['Employee No.', 'Employee No', 'Employee ID', '員工編號'],
+  email: ['Email Address', 'Email', '電子郵件'],
+  name: ['Name', '姓名'],
+  chineseName: ['Chinese Name', '中文姓名'],
+  englishName: ['English Name', '英文姓名'],
   bu: ['BU', 'Business Unit'],
-  department: ['Department'],
-  team: ['Team']
+  department: ['Department', '部門'],
+  team: ['Team', '團隊']
 });
+// A roster's fields as the dashboard edits them (importRoster()) and the
+// template lists them, with each one's header in Chinese and English. BU and
+// team are only in the template when the company has them.
+const ROSTER_FIELDS = Object.freeze([
+  { field: 'employeeId', zh: '員工編號', en: 'Employee No.', width: 14 },
+  { field: 'name', zh: '姓名', en: 'Name', width: 18 },
+  { field: 'email', zh: 'Email', en: 'Email', width: 32 },
+  { field: 'department', zh: '部門', en: 'Department', width: 22 },
+  { field: 'bu', zh: 'BU', en: 'BU', width: 16, optional: true },
+  { field: 'team', zh: '團隊', en: 'Team', width: 18, optional: true }
+]);
+const MAX_ROSTER_ROWS = 20000;
+const MAX_ROSTER_CELL = 255;
 
 function collapse(text) {
   return String(text ?? '').trim().replace(/\s+/g, ' ');
@@ -127,6 +144,16 @@ function companyFromFileName(fileName) {
   // Linux hub too.
   const match = /^([A-Za-z0-9][A-Za-z0-9-]*)/.exec(path.win32.basename(String(fileName || '')));
   return match ? match[1].toUpperCase() : '';
+}
+
+// The company a roster is for: the code asked for, else the one the file
+// name starts with.
+function companyCode(company, fileName = '') {
+  const code = collapse(company) || companyFromFileName(fileName);
+  if (!COMPANY_RE.test(code)) {
+    throw new AdminError(400, 'bad_company', 'company must be a short code such as ACME (letters, digits and -)');
+  }
+  return code;
 }
 
 // Picks the spelling a name was written with most often (the first on a tie).
@@ -182,9 +209,10 @@ function parseAnnouncement(sheets, { company }) {
   for (const record of table.records) {
     const employeeNo = collapse(record.get(COLUMNS.employeeNo));
     const rawEmail = collapse(record.get(COLUMNS.email));
+    const plainName = collapse(record.get(COLUMNS.name));
     const chineseName = collapse(record.get(COLUMNS.chineseName));
     const englishName = collapse(record.get(COLUMNS.englishName));
-    if (!employeeNo && !rawEmail && !chineseName && !englishName) continue;
+    if (!employeeNo && !rawEmail && !plainName && !chineseName && !englishName) continue;
     const email = normalizeOwnerEmail(rawEmail);
     if (!employeeNo || employeeNo.length > 64) {
       skipped.push({ line: record.line, reason: 'employee_no' });
@@ -222,7 +250,7 @@ function parseAnnouncement(sheets, { company }) {
     }
     listed.push({
       employeeId: employeeNo,
-      name: [chineseName, englishName].filter(Boolean).join(' ') || email,
+      name: plainName || [chineseName, englishName].filter(Boolean).join(' ') || email,
       email,
       chain: chain.join('\n')
     });
@@ -245,6 +273,52 @@ function parseAnnouncement(sheets, { company }) {
   build(root, company, [company], []);
   const employees = listed.map(({ chain, ...employee }) => ({ ...employee, unitId: (chain && idsByChain.get(chain)) || company }));
   return { company, sheet: table.sheet, units, employees, skipped, warnings };
+}
+
+// The rows an admin edited on the dashboard ([{ employeeId, name, email,
+// department, bu, team }]) as the one sheet parseAnnouncement() reads, row 1
+// the first of them.
+function rosterSheet(rows) {
+  if (!Array.isArray(rows)) throw new AdminError(400, 'bad_request', 'rows must be an array');
+  if (rows.length > MAX_ROSTER_ROWS) throw new AdminError(400, 'bad_request', `a roster has at most ${MAX_ROSTER_ROWS} rows`);
+  const header = Object.fromEntries(ROSTER_FIELDS.map((f, i) => [String.fromCharCode(65 + i), f.en]));
+  return {
+    name: 'roster',
+    rows: [{ number: 0, cells: header }, ...rows.map((row, index) => ({
+      number: index + 1,
+      cells: Object.fromEntries(ROSTER_FIELDS.map((f, i) => [String.fromCharCode(65 + i), String(row?.[f.field] ?? '').slice(0, MAX_ROSTER_CELL)]))
+    }))]
+  };
+}
+
+// The roster template: the company's roster (rows as companyRoster() gives them, none
+// for a new company) under the headers of `lang`, and a sheet of notes.
+function rosterWorkbook(rows, { lang = 'zh' } = {}) {
+  const en = lang === 'en';
+  const fields = ROSTER_FIELDS.filter((f) => !f.optional || rows.some((row) => row[f.field]));
+  const notes = en ? [
+    ['How to fill in this roster'],
+    ['One row per person: Employee No., Name, Email and Department. Employee No. and Email are required.'],
+    ['Each import is the company\'s whole roster: people not on it are deactivated (not deleted).'],
+    ['People in no department count directly under the company.'],
+    ['Save the file and drop it on the admin page (組織名單) to preview the changes before they are imported.']
+  ] : [
+    ['怎麼填這份名單'],
+    ['一列一個人：員工編號、姓名、Email、部門。員工編號與 Email 必填。'],
+    ['每次匯入都是這家公司的完整名單：名單上沒有的人會停用（不會刪除）。'],
+    ['沒有填部門的人，算在公司直屬。'],
+    ['存檔後拖到管理頁的「組織名單」，先預覽差異再匯入。']
+  ];
+  return writeWorkbook([
+    {
+      name: en ? 'Roster' : '名單',
+      header: true,
+      widths: fields.map((f) => f.width),
+      textColumns: [0],
+      rows: [fields.map((f) => (en ? f.en : f.zh)), ...rows.map((row) => fields.map((f) => row[f.field] || ''))]
+    },
+    { name: en ? 'Notes' : '說明', widths: [100], rows: notes }
+  ]);
 }
 
 // The AI account addresses in a device's latest limits, normalized.
@@ -591,14 +665,8 @@ function createOrg({ store, hub, onChange = () => {}, logger = console, now = ()
   //   dropSupersededRules  delete the email rules of addresses the list has
   //   keepOldEmails        a changed address still on a device stays its
   //                        employee's, by an email rule
-  async function importCompany(workbook, {
-    company = '', fileName = '', effectiveFrom = '', dryRun = false, confirm = false,
-    dropSupersededRules = false, keepOldEmails = false, actor = 'admin'
-  } = {}) {
-    const code = collapse(company) || companyFromFileName(fileName);
-    if (!COMPANY_RE.test(code)) {
-      throw new AdminError(400, 'bad_company', 'company must be a short code such as ACME (letters, digits and -)');
-    }
+  async function importCompany(workbook, options = {}) {
+    companyCode(options.company, options.fileName);
     let sheets;
     try {
       sheets = readWorkbook(workbook);
@@ -606,8 +674,23 @@ function createOrg({ store, hub, onChange = () => {}, logger = console, now = ()
       if (error instanceof XlsxError) throw new AdminError(400, 'bad_workbook', error.message);
       throw error;
     }
+    return importSheets(sheets, options);
+  }
+
+  // One company's roster as an admin edited it on the dashboard: rows of
+  // { employeeId, name, email, department, bu, team }, imported as a workbook
+  // of those columns would be, with the same options.
+  async function importRoster(rows, options = {}) {
+    return importSheets([rosterSheet(rows)], { ...options, fileName: '' });
+  }
+
+  async function importSheets(sheets, {
+    company = '', fileName = '', effectiveFrom = '', dryRun = false, confirm = false,
+    dropSupersededRules = false, keepOldEmails = false, actor = 'admin'
+  } = {}) {
+    const code = companyCode(company, fileName);
     const parsed = parseAnnouncement(sheets, { company: code });
-    if (!parsed.employees.length) throw new AdminError(400, 'bad_workbook', 'the workbook lists no employee with an email address');
+    if (!parsed.employees.length) throw new AdminError(400, 'bad_workbook', 'the roster lists no employee with an email address');
     const fileDate = fileDateOf(fileName);
     let effective;
     if (effectiveFrom) {
@@ -720,6 +803,38 @@ function createOrg({ store, hub, onChange = () => {}, logger = console, now = ()
       warnings: [...parsed.warnings, ...written.moved.map((move) => `email moved: ${move}`)],
       reconciled
     };
+  }
+
+  // One company's current roster, as the dashboard edits it and the template
+  // lists it: each active employee, by employee no., with the names of their
+  // department, BU and team ('' where they have none).
+  async function companyRoster(company) {
+    const code = companyCode(company);
+    const rows = await store.query(
+      'SELECT e.employee_id, e.name, e.email, p.unit_id FROM employee_placements p JOIN employees e ON e.employee_id = p.employee_id WHERE p.company_id = $1 AND e.is_active ORDER BY e.employee_id',
+      [code]
+    );
+    const nameAt = (unitId, level) => {
+      const id = units.has(unitId) ? orgTree.ancestorAt(unitId, level) : null;
+      return id ? units.get(id).name : '';
+    };
+    return {
+      company: code,
+      rows: rows.map((row) => ({
+        employeeId: row.employee_id,
+        name: row.name || '',
+        email: row.email || '',
+        department: nameAt(row.unit_id, 'department'),
+        bu: nameAt(row.unit_id, 'bu'),
+        team: nameAt(row.unit_id, 'team')
+      }))
+    };
+  }
+
+  // The roster template of a company (its current roster, if any) as .xlsx.
+  async function rosterTemplate(company, { lang = 'zh' } = {}) {
+    const { company: code, rows } = await companyRoster(company);
+    return { company: code, workbook: rosterWorkbook(rows, { lang }) };
   }
 
   // Each company's latest import, and with `company` its last imports too. A
@@ -1215,6 +1330,9 @@ function createOrg({ store, hub, onChange = () => {}, logger = console, now = ()
     reconcile,
     recordClaim,
     importCompany,
+    importRoster,
+    companyRoster,
+    rosterTemplate,
     importHistory,
     setEmailRule,
     removeEmailRule,
