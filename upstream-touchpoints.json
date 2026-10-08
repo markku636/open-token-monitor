@@ -22,7 +22,7 @@
     {
       "upstream": ["src/electron/renderer/app.js", "src/electron/renderer/index.html", "src/electron/renderer/i18n.js"],
       "check": ["packaging/build-client.js (UPSTREAM_PATCHES)"],
-      "why": "The client build rewrites these lines of upstream's renderer (device label, the GitLab releases link in every language); each must still be found exactly as often as the patch says, and a language upstream adds needs its own patch.",
+      "why": "The client build rewrites these lines of upstream's renderer (device label, the GitLab or GitHub releases link in every language); each must still be found exactly as often as the patch says, and a language upstream adds needs its own patch.",
       "watch": ["settings.appUpdate.source"],
       "verify": "node --test tests/clientBuild.test.js"
     },

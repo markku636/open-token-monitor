@@ -90,6 +90,7 @@ npm --prefix tauri run test:compat     # Rust 用戶端與 upstream/、根目錄
   - 先 `npm run build:image -- --dry-run` 看版本與文件。「未發行」是空的時候它會拒絕發行。
   - tag 的 pipeline：`verify` → `build:hub` → 手動 `deploy:hub`。
 - **`client-v<版本>`：用戶端。** 手動 `git tag client-v<版本>` 並推到 origin。tag 的 pipeline 不跑 verify，所以先確認那個 commit 通過 `npm run verify`。N 是同一個上游版本最大的 `client-v*` 加 1。
+  - 推到 GitHub：`.github/workflows/client-release.yml` 先跑 verify，再建立公開的 GitHub Release。安裝檔一律不帶 hub 與金鑰（`TM_CLIENT_NO_HUB=1`），這個 workflow 絕不能用 `TM_CLIENT_SECRET`、`TM_CLIENT_HUB_URL` 或任何 secret（`clientBuild.test.js`）。
 - 推出去的 tag 不刪、不移、不重用。那一版有問題就修好發下一號。
 - 只有 `client-v*` 建立 Release；`corp/v*` 的 job 不能有 `release:`（`deployHub.test.js`）。
 

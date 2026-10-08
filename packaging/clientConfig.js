@@ -1,8 +1,9 @@
 'use strict';
 
 // The build values of the company client (docs/client-build.zh-TW.md): the hub
-// URL and client key the installer starts with, the upload interval, launch at
-// login, the GitLab project the app updates from, and the version. They come
+// URL and client key the installer starts with (or none, TM_CLIENT_NO_HUB=1),
+// the upload interval, launch at login, the GitLab project or GitHub repository
+// the app updates from, and the version. They come
 // from the real environment first (GitLab CI/CD variables), then from
 // .env.client in the repository root for a local build. Validation follows the
 // checks of the earlier company installer.
@@ -21,6 +22,8 @@ const DEFAULT_UPLOAD_INTERVAL_MS = 1800000;
 const SECRET_RE = /^[A-Za-z0-9._~+=/-]{16,256}$/;
 const VERSION_RE = /^(\d+\.\d+\.\d+)-corp\.(0|[1-9]\d*)$/;
 const TAG_PREFIX = 'client-v';
+// owner/repo as GitHub allows them.
+const GITHUB_REPO_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
 
 function normalizeHubUrl(value, { allowHttp = false } = {}) {
   const text = String(value || '').trim();
@@ -64,6 +67,26 @@ function parseFlag(value, fallback, name = 'flag') {
   throw new Error(`${name}: expected 1 or 0, got "${value}"`);
 }
 
+// The hub the installer connects to, or null for an installer without one
+// (TM_CLIENT_NO_HUB=1): the user then enters the hub URL and client key in
+// Settings → Multi-device Sync, as with upstream's own app. That is the
+// installer a public GitHub Release carries, since anyone can unpack the key
+// from an installer. The flag is explicit so that a CI variable gone missing
+// fails the build instead of shipping an installer that connects nowhere.
+function normalizeHub(values, { allowHttp }) {
+  const noHub = parseFlag(values.TM_CLIENT_NO_HUB, false, 'TM_CLIENT_NO_HUB');
+  if (!noHub) {
+    if (!String(values.TM_CLIENT_HUB_URL || '').trim()) {
+      throw new Error('TM_CLIENT_HUB_URL is required (or TM_CLIENT_NO_HUB=1 for an installer without a hub)');
+    }
+    return { hubUrl: normalizeHubUrl(values.TM_CLIENT_HUB_URL, { allowHttp }), secret: normalizeSecret(values.TM_CLIENT_SECRET) };
+  }
+  if (String(values.TM_CLIENT_HUB_URL || '').trim() || String(values.TM_CLIENT_SECRET || '').trim()) {
+    throw new Error('TM_CLIENT_NO_HUB=1 builds an installer without a hub: leave TM_CLIENT_HUB_URL and TM_CLIENT_SECRET empty');
+  }
+  return null;
+}
+
 // The GitLab project whose newest Release the installed app updates from
 // (electron-updater's gitlab provider). CI passes $CI_PROJECT_URL and
 // $CI_PROJECT_ID. The feed uses the numeric id, which survives a rename or a
@@ -92,7 +115,31 @@ function normalizeUpdateSource(projectUrl, projectId) {
   if (!/^[1-9]\d*$/.test(idText)) {
     throw new Error('TM_CLIENT_UPDATE_PROJECT_ID must be the numeric project ID (Settings → General)');
   }
-  return { host: url.host, projectId: Number(idText), releasesUrl: `${url.origin}${projectPath}/-/releases` };
+  return { provider: 'gitlab', host: url.host, projectId: Number(idText), releasesUrl: `${url.origin}${projectPath}/-/releases` };
+}
+
+// The public GitHub repository (owner/repo) whose latest Release the installed
+// app updates from. The feed is the latest Release's download folder,
+// https://github.com/<owner>/<repo>/releases/latest/download/, read as a
+// generic feed (packaging/build-client.js updatePublishConfig()). Empty: none.
+function normalizeGitHubSource(repo) {
+  const text = String(repo || '').trim().replace(/^https:\/\/github\.com\//, '').replace(/\/+$/, '');
+  if (!text) return null;
+  if (!GITHUB_REPO_RE.test(text) || text.endsWith('.git')) {
+    throw new Error(`TM_CLIENT_UPDATE_GITHUB_REPO must be owner/repo (got "${repo}")`);
+  }
+  const releasesUrl = `https://github.com/${text}/releases`;
+  return { provider: 'github', repo: text, url: `${releasesUrl}/latest/download`, releasesUrl };
+}
+
+// One update source at most: a GitLab project or a GitHub repository.
+function resolveUpdateSource(values) {
+  const gitlab = normalizeUpdateSource(values.TM_CLIENT_UPDATE_PROJECT_URL, values.TM_CLIENT_UPDATE_PROJECT_ID);
+  const github = normalizeGitHubSource(values.TM_CLIENT_UPDATE_GITHUB_REPO);
+  if (gitlab && github) {
+    throw new Error('Set either TM_CLIENT_UPDATE_PROJECT_URL / _ID (GitLab) or TM_CLIENT_UPDATE_GITHUB_REPO (GitHub), not both');
+  }
+  return gitlab || github;
 }
 
 // X.Y.Z-corp.N, where X.Y.Z is the upstream version the build is made from. A
@@ -122,12 +169,17 @@ function readEnv({ env = process.env, envFile = ENV_FILE } = {}) {
 function resolveClientConfig({ upstreamVersion, env = process.env, envFile = ENV_FILE } = {}) {
   const values = readEnv({ env, envFile });
   const allowHttp = parseFlag(values.TM_CLIENT_ALLOW_HTTP, false, 'TM_CLIENT_ALLOW_HTTP');
-  const update = normalizeUpdateSource(values.TM_CLIENT_UPDATE_PROJECT_URL, values.TM_CLIENT_UPDATE_PROJECT_ID);
+  const hub = normalizeHub(values, { allowHttp });
+  const update = resolveUpdateSource(values);
+  // A GitHub Release is read without a token, so the repository is public and
+  // so is every installer on it, with any key inside.
+  if (hub && update?.provider === 'github') {
+    throw new Error('An installer that updates from GitHub is published there: build it with TM_CLIENT_NO_HUB=1, without a hub URL or client key');
+  }
   return {
     version: normalizeVersion(values.TM_CLIENT_VERSION, upstreamVersion),
     defaults: {
-      hubUrl: normalizeHubUrl(values.TM_CLIENT_HUB_URL, { allowHttp }),
-      secret: normalizeSecret(values.TM_CLIENT_SECRET),
+      ...(hub || {}),
       syncUploadIntervalMs: normalizeInterval(values.TM_CLIENT_SYNC_UPLOAD_INTERVAL_MS),
       startAtLogin: parseFlag(values.TM_CLIENT_START_AT_LOGIN, true, 'TM_CLIENT_START_AT_LOGIN'),
       // A launch at login minimizes the widget to the taskbar.
@@ -143,13 +195,15 @@ function resolveClientConfig({ upstreamVersion, env = process.env, envFile = ENV
 
 // For logs and --dry-run: never print the key.
 function redacted(defaults) {
-  return { ...defaults, secret: defaults.secret ? '***' : '' };
+  return defaults.secret ? { ...defaults, secret: '***' } : defaults;
 }
 
 module.exports = {
   DEFAULT_UPLOAD_INTERVAL_MS,
   ENV_FILE,
   UPLOAD_INTERVALS,
+  normalizeGitHubSource,
+  normalizeHub,
   normalizeHubUrl,
   normalizeInterval,
   normalizeSecret,
@@ -158,5 +212,6 @@ module.exports = {
   parseFlag,
   readEnv,
   redacted,
-  resolveClientConfig
+  resolveClientConfig,
+  resolveUpdateSource
 };

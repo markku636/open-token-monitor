@@ -430,7 +430,7 @@ npm run smoke:hub                        # 驗證用的丟棄式 hub：PGlite、
 | tag | 發行什麼 | 怎麼打 | 推上去之後 |
 |---|---|---|---|
 | `corp/v<版本>` | hub | 只用 `npm run build:image`，再 `git push origin HEAD`（下方「建立 hub 映像」）。不要手打。 | `verify` → `build:hub`（建映像、冒煙測試、存到 Package Registry）→ 手動按 `deploy:hub` |
-| `client-v<版本>` | 公司版用戶端 | 確認那個 commit 通過 `npm run verify`，再 `git tag client-v<版本>` 並推到 origin（[client-build.zh-TW.md](client-build.zh-TW.md)「發行」）。 | Windows、macOS、Linux 打包 → `release:client` 建立 GitLab Release，已安裝的 app 從最新的 Release 更新 |
+| `client-v<版本>` | 公司版用戶端 | 確認那個 commit 通過 `npm run verify`，再 `git tag client-v<版本>` 並推到 origin（[client-build.zh-TW.md](client-build.zh-TW.md)「發行」）。 | Windows、macOS、Linux 打包 → `release:client` 建立 GitLab Release，已安裝的 app 從最新的 Release 更新。推到 GitHub 則由 `client-release.yml` 建立不帶金鑰的公開 Release（[client-build.zh-TW.md](client-build.zh-TW.md)「從 GitHub 發行」） |
 
 - 兩種 tag 的 N 各算各的：同一個上游版本，hub 可能在 `corp/v0.63.1-corp.2`，用戶端已經到 `client-v0.63.1-corp.9`。上游版本換了，N 從 1 重新算。
 - 推出去的 tag 不刪也不移。那一版有問題時，修好再發下一號，例如 `corp/v0.63.1-corp.1` 的 pipeline 卡在 verify，修好後發的是 `corp/v0.63.1-corp.2`。

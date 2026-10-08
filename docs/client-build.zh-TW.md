@@ -11,11 +11,11 @@
 | 保持在工作列上方（Windows，實驗性） | 每台電腦開啟一次 | 關閉 |
 | 系統匣（Windows）與選單列（macOS）圖示 | 兩邊都只有單色的公司 logo（托盤文字「自訂…」），每台電腦設定一次 | Windows 是彩色圖示；macOS 是圖示加今日 Tokens 數字 |
 | 同步上傳頻率 | 每 30 分鐘（`1800000`） | 即時 |
-| 多裝置同步 | 已選「連接到 Hub」，填好 hub URL 與 client 金鑰 | 本機模式 |
+| 多裝置同步 | 已選「連接到 Hub」，填好 hub URL 與 client 金鑰。GitHub 發行的安裝檔不帶 hub，使用者自己填（見「從 GitHub 發行」） | 本機模式 |
 | widget 顯示的用量 | 只有這台電腦，見「只顯示這台電腦」 | 連接到 Hub 時是 hub 上全部裝置的加總 |
 | 裝置 ID | 每台電腦第一次開啟時產生一組隨機 UUID | 主機名稱 |
 | 裝置列表的名稱 | 主機名稱，沒有才顯示裝置 ID | 裝置 ID |
-| 檢查更新 | GitLab Release 的最新版（Windows、macOS、Linux；見「自動更新」） | GitHub 官方 release |
+| 檢查更新 | 公司 GitLab Release 或本 repo GitHub Release 的最新版（Windows、macOS、Linux；見「自動更新」） | GitHub 官方 release |
 | 自動下載更新 | 關閉：有新版時提示，使用者按了才下載安裝 | 關閉 |
 | 安裝檔 | Windows NSIS x64、macOS dmg arm64、Linux AppImage x64。Windows 與 Linux 不簽章，macOS 只有 ad-hoc 簽章、沒有公證 | 有簽章 |
 | 圖示 | 預設和上游相同；放了自己的 logo 就換成它，見「圖示」 | 藍底 Σ |
@@ -87,7 +87,7 @@
 | 檔案 | 改了什麼 | 原因 |
 |---|---|---|
 | `src/electron/renderer/app.js` 的 `deviceLabel()` | 裝置列表的名稱改成主機名稱優先，沒有主機名稱才顯示裝置 ID | 公司版的裝置 ID 是隨機 UUID，上游用裝置 ID 當名稱，整排都會是 UUID |
-| `src/electron/renderer/index.html`、`i18n.js`（5 個語系）的 `settings.appUpdate.source` | 「應用程式更新」標題右邊的「GitHub releases」改成「GitLab releases」 | 公司版從 GitLab Release 更新（見「自動更新」） |
+| `src/electron/renderer/index.html`、`i18n.js`（5 個語系）的 `settings.appUpdate.source` | 「應用程式更新」標題右邊的「GitHub releases」改成「GitLab releases」；從 GitHub 更新的安裝檔維持「GitHub releases」（`upstreamPatches('GitHub')`） | 公司版從 GitLab Release 更新（見「自動更新」） |
 | `src/electron/renderer/index.html`、`app.js` 的 `settings.appUpdate.source` | 「GitLab releases」改成連結，點了開 GitLab 的 Releases 頁（`/-/releases`） | 使用者直接找得到公司版的每一版。連結開的是上游 GitHub 的 Releases 頁（main.js 的白名單只放行它），入口在最後一步換成 GitLab（見「自動更新」） |
 
 ## 安全：金鑰會跟著安裝檔走
@@ -95,6 +95,7 @@
 - **任何拿到安裝檔的人都能解出 client 金鑰**（它在 `app.asar` 裡）。
 - 只能放 client 金鑰（hub 的 `TOKEN_MONITOR_CLIENT_SECRETS` 其中一把），**絕不可以**放 admin 金鑰 `TOKEN_MONITOR_SECRET`。
 - 安裝檔放在 GitLab Release。自動更新要求專案的 Release 與 Package Registry 不用登入就能下載（見「自動更新」），所以連得到這台 GitLab 的人都拿得到 client 金鑰。GitLab 若對外開放，要把這把金鑰當成公開的。
+- 本 repo 在 GitHub 上是公開的，所以 GitHub Release 的安裝檔**一律不帶 hub URL 與金鑰**（`TM_CLIENT_NO_HUB=1`）。更新來源是 GitHub（`TM_CLIENT_UPDATE_GITHUB_REPO`）又帶了 hub 或金鑰時，打包直接失敗。
 - 換金鑰：
   1. 在 hub 的 `TOKEN_MONITOR_CLIENT_SECRETS` 加上新金鑰，新舊並列，重啟 hub。
   2. 用新金鑰打一版新的安裝檔。
@@ -107,15 +108,17 @@
 
 | 變數 | 預設值 | 說明 |
 |---|---|---|
-| `TM_CLIENT_HUB_URL` | 必填 | 例如 `https://tokens.example.com` 或 `http://192.0.2.10`。不可以帶帳密、query。CI 發行時，Release 說明的安裝步驟連到這台 hub 的 `/install`。 |
+| `TM_CLIENT_NO_HUB` | `0` | `1`：打出不帶 hub 的安裝檔，`TM_CLIENT_HUB_URL` 與 `TM_CLIENT_SECRET` 都要留空。第一次開啟時寫入其他設定（上傳頻率、隨機裝置 ID、開機啟動），hub URL 與金鑰由使用者在「多裝置同步」自己填。GitHub 發行用的就是這種（見「從 GitHub 發行」）。要明確設定，CI 變數漏設時才會失敗，而不是默默打出連不到 hub 的安裝檔。 |
+| `TM_CLIENT_HUB_URL` | 必填（`TM_CLIENT_NO_HUB=1` 時留空） | 例如 `https://tokens.example.com` 或 `http://192.0.2.10`。不可以帶帳密、query。CI 發行時，Release 說明的安裝步驟連到這台 hub 的 `/install`。 |
 | `TM_CLIENT_ALLOW_HTTP` | `0` | hub 是 http 時要設為 `1`，例如直接用 Docker Compose 預設的 port 80（http）；前面有 https 反向代理時，填 `https://…` 並維持 `0`。 |
-| `TM_CLIENT_SECRET` | 必填 | client 金鑰，16～256 字元，`A-Z a-z 0-9 . _ ~ + = / -`。 |
+| `TM_CLIENT_SECRET` | 必填（`TM_CLIENT_NO_HUB=1` 時留空） | client 金鑰，16～256 字元，`A-Z a-z 0-9 . _ ~ + = / -`。 |
 | `TM_CLIENT_SYNC_UPLOAD_INTERVAL_MS` | `1800000` | 只接受 `0`（即時）、`600000`、`1200000`、`1800000`。 |
 | `TM_CLIENT_START_AT_LOGIN` | `1` | 每台電腦第一次開啟時打開開機啟動（已裝過的電腦也會補開一次）；`0` 則不動。 |
 | `TM_CLIENT_START_MINIMIZED` | `1` | 開機自動啟動時把 widget 縮到工作列；`0` 則和上游一樣顯示。手動打開不受影響。見「運作方式」第 4 步。 |
 | `TM_CLIENT_OWN_DEVICE_ONLY` | `1` | widget 只顯示這台電腦的用量；`0` 則和上游一樣顯示 hub 上全部裝置。不論哪一個，上傳都一樣。見「只顯示這台電腦」。 |
 | `TM_CLIENT_UPDATE_PROJECT_URL` | 空白 | 更新來源：GitLab 專案的網址，例如 `https://gitlab.example.com/<group>/<project>`。要 https，不能帶帳密、query。CI 自動帶 `$CI_PROJECT_URL`，不用設。和下一個一起設，或一起留空（不檢查更新）。 |
 | `TM_CLIENT_UPDATE_PROJECT_ID` | 空白 | 同一個專案的數字 ID（**Settings → General** 的 Project ID，例如 `123`）。CI 自動帶 `$CI_PROJECT_ID`。用數字 ID，專案改名或搬家後已安裝的 app 一樣找得到。 |
+| `TM_CLIENT_UPDATE_GITHUB_REPO` | 空白 | 另一種更新來源：公開的 GitHub repo，寫成 `owner/repo`，app 從它最新的 Release 更新。和上面兩個只能擇一。只能搭配 `TM_CLIENT_NO_HUB=1`。GitHub Actions 自動帶 `${{ github.repository }}`。 |
 | `TM_CLIENT_VERSION` | `<上游版本>-corp.0` | `X.Y.Z-corp.N`，X.Y.Z 必須等於 `upstream/package.json` 的版本。CI 從 tag 取得，不用設。`build-client.ps1` 在這裡留空時會自動跳號（見下方）。 |
 
 ## 地端打包（Windows）
@@ -315,6 +318,24 @@
 
 不發版、只想拿一份安裝檔試用：在 main 上 Run pipeline，手動按 `build:client:windows`、`build:client:macos` 或 `build:client:linux`，版本是 `<上游版本>-corp.0`，從 job 的 artifacts 下載。打包 job 不等 `verify`，pipeline 一出來就可以按。
 
+## 從 GitHub 發行
+
+本 repo 在 GitHub 上是公開的。把 `client-v*` tag 推到 GitHub，[.github/workflows/client-release.yml](../.github/workflows/client-release.yml) 會打包並建立 GitHub Release。
+
+- **安裝檔不帶 hub URL 與金鑰**（`TM_CLIENT_NO_HUB=1`）：公開的 Release 誰都下載得到，帶著金鑰就等於把金鑰公開。使用者裝好後，向管理者拿 hub 網址與 client 金鑰，在 ⚙ →「多裝置同步」→「連接到 Hub」自己填一次。其他設定和公司版一樣：每 30 分鐘上傳、隨機裝置 ID、開機啟動、只顯示這台電腦。
+- **流程**：`verify`（`npm run verify`）通過後，Windows（`windows-latest`）、macOS（`macos-latest`，Apple 晶片）、Linux（`ubuntu-latest`）同時打包，三個都成功才由 `release` job 建立 Release。它會檢查 `latest*.yml` 的版本與檔名，附上 SHA256，並標成 latest。
+- **Release 說明**：[packaging/client-release-notes.github.md](../packaging/client-release-notes.github.md)，`@VERSION@` 與 `@DOWNLOADS@` 由 workflow 代入。內容是哪種電腦下載哪個檔案、怎麼打開沒有簽章的安裝檔、怎麼連上 hub。中英文要一起改，`tests/clientBuild.test.js` 會檢查。
+- **自動更新**：app 從本 repo **最新的 GitHub Release** 更新（`TM_CLIENT_UPDATE_GITHUB_REPO`，見「自動更新」）。
+- **發行步驟**：和「發行」一樣打 `client-vX.Y.Z-corp.N` tag，推到 GitHub：
+
+  ```bash
+  git tag client-v0.63.1-corp.1
+  git push origin client-v0.63.1-corp.1
+  ```
+
+  workflow 在 GitHub 的 **Actions → Client release**，完成後在 **Releases** 看得到。
+- 同一個 tag 也推到 GitLab 時，GitLab 另外打出帶金鑰的公司版。兩邊的版本號共用同一組 N。
+
 ## 自動更新
 
 Windows、macOS 與 Linux 的 app 會檢查本 repo 所在 GitLab 專案**最新的 Release**，有新版時在 app 裡提示，使用者按「下載更新」、「重啟更新」就完成。「自動下載更新」維持關閉，不會自己在背景下載。
@@ -332,6 +353,10 @@ Windows、macOS 與 Linux 的 app 會檢查本 repo 所在 GitLab 專案**最新
   - Squirrel 會清掉新版的隔離標示，更新後打開不會再被 Gatekeeper 擋，不用再按「強制打開」。
   - app 要放在「應用程式」資料夾，帳號要能寫入那裡（一般是管理者）。直接從 dmg 打開、或放在「下載項目」裡沒拖過的 app 會被 macOS 移到唯讀的暫存位置（App Translocation），更新會失敗。
   - macOS 13 起若跳出「已阻止『Token Monitor』修改你 Mac 上的 App」：到「系統設定 → 隱私權與安全性 → App 管理」打開 Token Monitor，再按一次「重啟更新」。
+- **從 GitHub 更新**（`TM_CLIENT_UPDATE_GITHUB_REPO`）：`app-update.yml` 是 `provider: generic`，網址是 `https://github.com/<owner>/<repo>/releases/latest/download`。app 從那裡讀 `latest*.yml`，安裝檔也從同一個位置下載，GitHub 會轉到最新 Release 的檔案。
+  - 不用 electron-updater 的 github provider：版本有預發行部分（`-corp.N`）時，它只接受 tag 本身是 semver 的 Release，`client-v…` 不是，所以永遠找不到新版。
+  - GitHub 的「最新」是最晚建立、不是 draft 也不是 prerelease 的 Release。本 repo 只有 `client-v*` 會建 Release，hub 的 `corp/v*` 不建。
+  - 「查看 release」換成 `https://github.com/<owner>/<repo>/releases/tag/client-v<版本>`，標題旁的來源標成「GitHub releases」。
 - **沒有更新來源的安裝檔**：用沒有 `TM_CLIENT_UPDATE_*` 的 `.env.client` 在本機打包的版本，安裝目錄的 `resources\`（Mac 是 `Token Monitor.app/Contents/Resources/`）底下沒有 `app-update.yml`。這些電腦要手動裝一次新版，之後才會自動提示。
 - **安裝檔沒有簽章**：Windows 不核對發行者（`verifyUpdateCodeSignature: false`），Mac 只要求同一個 identifier，兩者都只靠 sha512 確認檔案和 `latest.yml`／`latest-mac.yml` 一致。能改 Release 的人就能推送任何安裝檔給所有人，Maintainer 權限要控管好。
 

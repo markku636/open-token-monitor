@@ -8,6 +8,11 @@ hub 與 Electron 用戶端打包（`X.Y.Z-corp.N`）的功能異動，新的在�
 
 ## 未發行
 
+- 用戶端改從 GitHub 發行與更新（[client-build.zh-TW.md](docs/client-build.zh-TW.md)「從 GitHub 發行」）：
+  - 推 `client-v*` tag 到 GitHub，`.github/workflows/client-release.yml` 跑 verify、打包 Windows、macOS、Linux，並建立 GitHub Release。
+  - repo 是公開的，所以這些安裝檔不帶 hub URL 與金鑰（新設定 `TM_CLIENT_NO_HUB=1`），使用者在「多裝置同步」自己填。
+  - 新設定 `TM_CLIENT_UPDATE_GITHUB_REPO=owner/repo`：app 從那個 repo 最新的 Release 更新。只能搭配 `TM_CLIENT_NO_HUB=1`，帶著金鑰時打包會失敗。
+  - GitLab 的發行與更新方式不變。
 - 首次開源（2026-10-03）：一個 monorepo 包含三部分。
   - hub overlay：PostgreSQL、組織資料、dashboard、報表 API 與部署腳本，見 [docs/hub.zh-TW.md](docs/hub.zh-TW.md)。
   - Electron 用戶端打包：見 [docs/client-build.zh-TW.md](docs/client-build.zh-TW.md)。

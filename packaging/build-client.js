@@ -85,12 +85,21 @@ function parseCli(argv) {
 }
 
 // Where the packaged app looks for updates: the newest Release of the company
-// GitLab project (packaging/clientConfig.js normalizeUpdateSource()). From this
-// electron-builder writes resources/app-update.yml into the app and
+// GitLab project (packaging/clientConfig.js normalizeUpdateSource()), or the
+// latest Release of a public GitHub repository (normalizeGitHubSource()). From
+// this electron-builder writes resources/app-update.yml into the app and
 // latest.yml / latest-mac.yml / latest-linux.yml next to the installer;
-// .gitlab-ci.yml attaches those to the Release. electron-updater reads
+// .gitlab-ci.yml and .github/workflows/client-release.yml attach those to the
+// Release. On GitLab electron-updater reads
 // /api/v4/projects/<id>/releases/permalink/latest and picks the assets by link
 // name, so the Release names its links after the files.
+//
+// On GitHub it reads the latest Release's files as a generic feed, from
+// /releases/latest/download/. Its github provider cannot be used: an app whose
+// version has a prerelease part (-corp.N) only takes Releases whose tag is
+// itself a semver version, which client-vX.Y.Z-corp.N is not, so it would
+// never find one. GitHub's latest Release is the newest one that is neither a
+// draft nor a prerelease; only client-v* tags make Releases.
 //
 // `channel` is fixed: from an X.Y.Z-corp.N version electron-builder would
 // infer the channel `corp` and write corp.yml instead.
@@ -104,7 +113,13 @@ function parseCli(argv) {
 // automaticAppUpdates off.
 function updatePublishConfig(update) {
   if (!update) return null;
+  if (update.provider === 'github') return [{ provider: 'generic', url: update.url, channel: 'latest' }];
   return [{ provider: 'gitlab', host: update.host, projectId: update.projectId, channel: 'latest' }];
+}
+
+// What the App Updates header calls the update source (upstreamPatches()).
+function updateSourceName(update) {
+  return update?.provider === 'github' ? 'GitHub' : 'GitLab';
 }
 
 function brandWinIcon(file = WIN_ICON) {
@@ -212,12 +227,13 @@ const UPSTREAM_PATCHES = [
   },
   // The App Updates header names where updates come from. The company build
   // updates from the GitLab Release (updatePublishConfig()); upstream's text,
-  // in the page and in each language, says GitHub.
+  // in the page and in each language, says GitHub. A build that updates from
+  // GitHub says GitHub again (upstreamPatches()).
   //
   // The name is a link to the Releases too. The outer span keeps the header's
   // styling. The click opens upstream's Releases page, the one URL the
   // allowlist in main.js lets through; the company entry swaps it for the
-  // GitLab Releases (client/electron/main.js corpReleasePageUrl()).
+  // company's Releases (client/electron/main.js corpReleasePageUrl()).
   {
     file: 'src/electron/renderer/index.html',
     from: '<span data-i18n="settings.appUpdate.source">GitHub releases</span>',
@@ -238,6 +254,11 @@ const UPSTREAM_PATCHES = [
     ].join('\n')
   }
 ];
+
+// UPSTREAM_PATCHES for a build whose update source is `source` (updateSourceName()).
+function upstreamPatches(source) {
+  return UPSTREAM_PATCHES.map((patch) => ({ ...patch, to: patch.to.replace(/GitLab releases/g, `${source} releases`) }));
+}
 
 function patchUpstream(appDir, patches = UPSTREAM_PATCHES) {
   for (const { file, from, to, count: expected = 1 } of patches) {
@@ -368,9 +389,10 @@ async function main(argv = process.argv.slice(2), env = process.env) {
 
   console.log(`Company client ${version} for ${cli.platform}${crossBuild ? ' (cross-OS build)' : ''}`);
   console.log(`First-run settings: ${JSON.stringify(redacted(defaults))}`);
-  console.log(config.publish
-    ? `Updates: the newest Release of GitLab project ${update.projectId} on ${update.host}`
-    : 'Updates: none (TM_CLIENT_UPDATE_PROJECT_URL / _ID not set)');
+  if (!defaults.hubUrl) console.log('Hub: none (TM_CLIENT_NO_HUB=1); the user enters the hub URL and client key in Settings');
+  if (!update) console.log('Updates: none (neither TM_CLIENT_UPDATE_PROJECT_URL / _ID nor TM_CLIENT_UPDATE_GITHUB_REPO set)');
+  else if (update.provider === 'github') console.log(`Updates: the latest Release of GitHub repository ${update.repo}`);
+  else console.log(`Updates: the newest Release of GitLab project ${update.projectId} on ${update.host}`);
   if (cli.dryRun) {
     console.log(JSON.stringify(config, null, 2));
     return;
@@ -380,7 +402,7 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     copyUpstream(APP_DIR);
     const logo = overlayAssets(APP_DIR);
     console.log(`Logo: ${logo.length ? logo.map((file) => `assets/${file}`).join(', ') : "upstream's (no client/assets/)"}`);
-    console.log(`Patched: ${patchUpstream(APP_DIR).join(', ')}`);
+    console.log(`Patched: ${patchUpstream(APP_DIR, upstreamPatches(updateSourceName(update))).join(', ')}`);
     writeCorpFiles(APP_DIR, defaults);
     const configFile = path.join(WORK_DIR, 'electron-builder.json');
     fs.writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`);
@@ -416,4 +438,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { ASSETS_SOURCE, CORP_MAIN, COPY_EXCLUDES, MAC_AFTER_SIGN, NETWORK_ERROR, NETWORK_RETRY_DELAYS_MS, TARGETS, UPSTREAM_PATCHES, WIN_ICON, brandWinIcon, createBuilderConfig, installerFileName, main, overlayAssets, parseCli, patchUpstream, retryOnNetworkError, runTee, targetPlatformPackages, updatePublishConfig, writeCorpFiles };
+module.exports = { ASSETS_SOURCE, CORP_MAIN, COPY_EXCLUDES, MAC_AFTER_SIGN, NETWORK_ERROR, NETWORK_RETRY_DELAYS_MS, TARGETS, UPSTREAM_PATCHES, WIN_ICON, brandWinIcon, createBuilderConfig, installerFileName, main, overlayAssets, parseCli, patchUpstream, retryOnNetworkError, runTee, targetPlatformPackages, updatePublishConfig, updateSourceName, upstreamPatches, writeCorpFiles };

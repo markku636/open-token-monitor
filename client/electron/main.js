@@ -7,13 +7,15 @@
 // On the first launch (no settings.json yet) it writes the settings the company
 // wants: connected to the hub, the client key, the upload interval. Where
 // settings.json already exists (an upgrade, an earlier install) it connects it
-// to the hub once instead, leaving the rest of the file alone. Launch at login,
+// to the hub once instead, leaving the rest of the file alone. A build without
+// a hub (TM_CLIENT_NO_HUB=1, the one on a public Release) writes the rest and
+// leaves the hub URL and client key to the user's Settings. Launch at login,
 // "Keep above taskbar" and the logo-only tray icon are turned on once per
 // machine too. Each is recorded in corp-state.json and never done a second
 // time, so whatever the user changes later (autostart off, another hub) stays.
 // On Windows launch at login passes an argument, and that launch minimizes the
 // widget to the taskbar. The release page of an update is pointed at the company
-// GitLab, an update upstream found elsewhere (GitHub) is forgotten, and on
+// Releases (GitLab or GitHub), an update upstream found elsewhere is forgotten, and on
 // Linux launch at login follows an updated AppImage. The widget shows this
 // machine's usage only, not every device on the hub (ownDeviceView.js). With a
 // title-logo.png next to this file (client/README.md), the Σ at the top left of
@@ -56,16 +58,15 @@ function markState(dir, fsApi, key) {
 
 // Returns true when it wrote settings.json, i.e. this is the first launch.
 // `secret` goes into settings.json on purpose: upstream moves it into
-// credentials.json on the next readSettings() (migrateLegacySettings()).
+// credentials.json on the next readSettings() (migrateLegacySettings()). A
+// build without a hub writes no hub fields: upstream starts unconnected.
 function seedFirstRun({ dir, defaults, fsApi = fs, randomUUID = crypto.randomUUID }) {
-  if (!defaults || !defaults.hubUrl) return false;
+  if (!defaults) return false;
   const settingsFile = path.join(dir, 'settings.json');
   if (fsApi.existsSync(settingsFile)) return false;
   const settings = {
     deviceId: randomUUID(),
-    hubMode: 'client',
-    hubUrl: defaults.hubUrl,
-    secret: defaults.secret,
+    ...(defaults.hubUrl ? { hubMode: 'client', hubUrl: defaults.hubUrl, secret: defaults.secret } : {}),
     syncUploadIntervalMs: defaults.syncUploadIntervalMs,
     automaticAppUpdates: false,
     startAtLogin: Boolean(defaults.startAtLogin)
@@ -306,16 +307,18 @@ function followAppImageAutostart({ linuxAutostart, env = process.env, fsApi = fs
 // (latestFromUpdaterInfo() in src/shared/appUpdater.js). It cannot read the
 // company's tag client-vX.Y.Z-corp.N, so it falls back to vX.Y.Z-corp.N, a page
 // GitHub does not have. main.js opens only allowlisted URLs, and the company
-// GitLab is not on the list, so the GitHub URL is left to pass the allowlist
-// and is swapped for the GitLab Release at the last step, in
-// shell.openExternal. Only -corp.N tags are swapped: upstream never publishes
-// one, so no real upstream page is hidden.
+// GitLab or GitHub repository is not on the list, so upstream's URL is left to
+// pass the allowlist and is swapped for the company Release at the last step,
+// in shell.openExternal. Only -corp.N tags are swapped: upstream never
+// publishes one, so no real upstream page is hidden. A GitLab Release page is
+// <project>/-/releases/<tag>, a GitHub one <repo>/releases/tag/<tag>.
 //
 // The Releases list itself is swapped too: upstream never opens it, only the
-// "GitLab releases" link the company build adds to the App Updates header
-// (UPSTREAM_PATCHES in packaging/build-client.js).
+// "GitLab releases" (or "GitHub releases") link the company build adds to the
+// App Updates header (UPSTREAM_PATCHES in packaging/build-client.js).
 const CORP_TAG_URL = /^https:\/\/github\.com\/Javis603\/token-monitor\/releases\/tag\/v(\d+\.\d+\.\d+-corp\.\d+)$/;
 const RELEASES_URL = /^https:\/\/github\.com\/Javis603\/token-monitor\/releases\/?$/;
+const GITLAB_RELEASES = /\/-\/releases$/;
 
 function corpReleasePageUrl(url, releasesUrl) {
   let text;
@@ -326,7 +329,8 @@ function corpReleasePageUrl(url, releasesUrl) {
   }
   if (RELEASES_URL.test(text)) return releasesUrl;
   const match = CORP_TAG_URL.exec(text);
-  return match ? `${releasesUrl}/client-v${match[1]}` : url;
+  if (!match) return url;
+  return `${releasesUrl}${GITLAB_RELEASES.test(releasesUrl) ? '' : '/tag'}/client-v${match[1]}`;
 }
 
 // Wraps shell.openExternal in place. main.js reads `shell.openExternal` at every
@@ -509,12 +513,12 @@ function prepareLoginLaunch({ app, dir, defaults }) {
   }
 }
 
-// What the company updates (from the GitLab Release) need before upstream runs.
+// What the company updates (from the GitLab or GitHub Release) need before upstream runs.
 function prepareForUpdates({ dir, defaults }) {
   try {
     installReleasePageRedirect({ shell: require('electron').shell, releasesUrl: defaults?.releasesUrl });
   } catch (error) {
-    console.log(`[corp] could not point the release page at GitLab: ${error.message}`);
+    console.log(`[corp] could not point the release page at the company Releases: ${error.message}`);
   }
   try {
     if (dropUpstreamUpdateCache({ dir })) console.log('[corp] dropped an update found outside the company feed');

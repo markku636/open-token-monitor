@@ -1,0 +1,133 @@
+name: Client release
+
+# A client-vX.Y.Z-corp.N tag builds the company Electron client for Windows,
+# macOS and Linux and publishes them as this repository's GitHub Release
+# (docs/client-build.zh-TW.md, "從 GitHub 發行"). The repository is public, so
+# the installers carry no hub URL and no client key (TM_CLIENT_NO_HUB=1): the
+# user enters both in Settings. Installed apps update from this repository's
+# latest Release (TM_CLIENT_UPDATE_GITHUB_REPO).
+
+on:
+  push:
+    tags: ['client-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # check:upstream compares upstream/ with the latest subtree squash commit.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+
+  build:
+    name: build (${{ matrix.platform }})
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - platform: win
+            os: windows-latest
+          - platform: mac
+            os: macos-latest
+          - platform: linux
+            os: ubuntu-latest
+    env:
+      # An installer without a hub; packaging/clientConfig.js refuses a GitHub
+      # update source with a hub URL or client key.
+      TM_CLIENT_NO_HUB: '1'
+      TM_CLIENT_UPDATE_GITHUB_REPO: ${{ github.repository }}
+      TM_CLIENT_VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:client -- --platform ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-${{ matrix.platform }}
+          # The installers, the zip an installed Mac updates from, and the update
+          # info of each build: latest.yml, latest-mac.yml, latest-linux.yml.
+          path: |
+            dist/client/*.exe
+            dist/client/*.dmg
+            dist/client/*.zip
+            dist/client/*.AppImage
+            dist/client/latest*.yml
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: client-*
+          path: dist/client
+          merge-multiple: true
+      # The installed apps take the latest Release as an update when its
+      # latest*.yml names a newer version, and download the file it names from
+      # the same Release. A yml of another version or another file name would
+      # offer the wrong update or none. A third argument names the line that
+      # must name the file: path, or for macOS a `files:` entry, the one
+      # electron-updater takes the zip from.
+      - name: Check the update info
+        run: |
+          CLIENT_VERSION="${TAG#client-v}"
+          check_update_info() {
+            grep -Eq "^version: '?${CLIENT_VERSION}'?\$" "dist/client/$1" \
+              && grep -Eq "^${3:-path}: '?$2'?\$" "dist/client/$1" \
+              || { echo "dist/client/$1 does not describe $2 ${CLIENT_VERSION}"; exit 1; }
+          }
+          check_update_info latest.yml "Token-Monitor_${CLIENT_VERSION}_x64-setup.exe"
+          check_update_info latest-mac.yml "Token-Monitor_${CLIENT_VERSION}_aarch64.zip" "  - url"
+          check_update_info latest-linux.yml "Token-Monitor_${CLIENT_VERSION}_amd64.AppImage"
+      # The Release's text: which file for which computer, how to connect it to
+      # a hub (packaging/client-release-notes.github.md), then the checksums.
+      - name: Write the Release notes
+        run: |
+          CLIENT_VERSION="${TAG#client-v}"
+          sed -e "s|@VERSION@|${CLIENT_VERSION}|g" \
+            -e "s|@DOWNLOADS@|${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}|g" \
+            packaging/client-release-notes.github.md > release-notes.md
+          if grep -n '@[A-Z][A-Z]*@' release-notes.md; then echo "release-notes.md has a placeholder left"; exit 1; fi
+          {
+            printf '\n<details><summary>SHA256</summary>\n\n```\n'
+            (cd dist/client && sha256sum *.exe *.dmg *.AppImage)
+            printf '```\n\n</details>\n'
+          } >> release-notes.md
+      # --latest: the installed apps read /releases/latest/download/, which is
+      # the newest Release that is neither a draft nor a prerelease.
+      - name: Publish the Release
+        run: |
+          gh release create "$TAG" dist/client/* \
+            --title "Token Monitor ${TAG#client-v}" \
+            --notes-file release-notes.md \
+            --verify-tag \
+            --latest

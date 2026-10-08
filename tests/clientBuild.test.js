@@ -13,6 +13,7 @@ const { EventEmitter } = require('node:events');
 
 const { ROOT, upstream } = require('../upstream');
 const {
+  normalizeGitHubSource,
   normalizeHubUrl,
   normalizeInterval,
   normalizeSecret,
@@ -40,6 +41,8 @@ const {
   runTee,
   targetPlatformPackages,
   updatePublishConfig,
+  updateSourceName,
+  upstreamPatches,
   writeCorpFiles
 } = require('../packaging/build-client');
 const macAfterSign = require('../packaging/macAfterSign');
@@ -157,6 +160,7 @@ test('the update source is a GitLab project page with its numeric id, or nothing
   assert.equal(normalizeUpdateSource('', ''), null);
   assert.equal(normalizeUpdateSource(undefined, undefined), null);
   assert.deepEqual(normalizeUpdateSource(' https://gitlab.example.com/tools/token-monitor/ ', '42'), {
+    provider: 'gitlab',
     host: 'gitlab.example.com',
     projectId: 42,
     releasesUrl: 'https://gitlab.example.com/tools/token-monitor/-/releases'
@@ -183,6 +187,7 @@ test('resolveClientConfig passes the update source on, and its Release pages to 
   };
   const { defaults, update } = resolveClientConfig({ upstreamVersion: '0.63.1', env, envFile: NO_FILE });
   assert.deepEqual(update, {
+    provider: 'gitlab',
     host: 'gitlab.example.com',
     projectId: 42,
     releasesUrl: 'https://gitlab.example.com/tools/token-monitor/-/releases'
@@ -192,6 +197,73 @@ test('resolveClientConfig passes the update source on, and its Release pages to 
   const none = resolveClientConfig({ upstreamVersion: '0.63.1', env: { TM_CLIENT_HUB_URL: 'https://hub.example', TM_CLIENT_SECRET: SECRET }, envFile: NO_FILE });
   assert.equal(none.update, null);
   assert.equal('releasesUrl' in none.defaults, false);
+});
+
+test('TM_CLIENT_NO_HUB=1 builds an installer without a hub URL or client key, and only on purpose', () => {
+  const resolve = (env) => resolveClientConfig({ upstreamVersion: '0.63.1', env, envFile: NO_FILE });
+  const { defaults } = resolve({ TM_CLIENT_NO_HUB: '1' });
+  assert.deepEqual(defaults, { syncUploadIntervalMs: 1800000, startAtLogin: true, startMinimizedAtLogin: true, ownDeviceOnly: true });
+  assert.equal(redacted(defaults), defaults);
+  assert.throws(() => resolve({}), /TM_CLIENT_HUB_URL is required \(or TM_CLIENT_NO_HUB=1/);
+  assert.throws(() => resolve({ TM_CLIENT_NO_HUB: '1', TM_CLIENT_SECRET: SECRET }), /leave TM_CLIENT_HUB_URL and TM_CLIENT_SECRET empty/);
+  assert.throws(() => resolve({ TM_CLIENT_NO_HUB: '1', TM_CLIENT_HUB_URL: 'https://hub.example' }), /leave TM_CLIENT_HUB_URL and TM_CLIENT_SECRET empty/);
+  assert.throws(() => resolve({ TM_CLIENT_NO_HUB: 'maybe' }), /TM_CLIENT_NO_HUB: expected 1 or 0/);
+  // 0 is the default: the hub is required again.
+  assert.throws(() => resolve({ TM_CLIENT_NO_HUB: '0', TM_CLIENT_SECRET: SECRET }), /TM_CLIENT_HUB_URL is required/);
+});
+
+test('the update source can be a public GitHub repository, read as a generic feed of its latest Release', () => {
+  assert.equal(normalizeGitHubSource(''), null);
+  assert.equal(normalizeGitHubSource(undefined), null);
+  const expected = {
+    provider: 'github',
+    repo: 'example-org/token-monitor',
+    url: 'https://github.com/example-org/token-monitor/releases/latest/download',
+    releasesUrl: 'https://github.com/example-org/token-monitor/releases'
+  };
+  assert.deepEqual(normalizeGitHubSource(' example-org/token-monitor '), expected);
+  assert.deepEqual(normalizeGitHubSource('https://github.com/example-org/token-monitor/'), expected);
+  for (const bad of ['token-monitor', 'a/b/c', '-a/b', 'a/b.git', 'a b/c', 'https://gitlab.example.com/a/b']) {
+    assert.throws(() => normalizeGitHubSource(bad), /TM_CLIENT_UPDATE_GITHUB_REPO must be owner\/repo/, bad);
+  }
+
+  const resolve = (env) => resolveClientConfig({ upstreamVersion: '0.63.1', env, envFile: NO_FILE });
+  const { defaults, update } = resolve({ TM_CLIENT_NO_HUB: '1', TM_CLIENT_UPDATE_GITHUB_REPO: 'example-org/token-monitor' });
+  assert.deepEqual(update, expected);
+  assert.equal(defaults.releasesUrl, expected.releasesUrl);
+  assert.deepEqual(updatePublishConfig(update), [{ provider: 'generic', url: expected.url, channel: 'latest' }]);
+  assert.equal(updateSourceName(update), 'GitHub');
+  assert.equal(updateSourceName({ provider: 'gitlab' }), 'GitLab');
+  assert.equal(updateSourceName(null), 'GitLab');
+
+  // A GitHub Release is public: an installer with a key never goes there.
+  assert.throws(
+    () => resolve({ TM_CLIENT_HUB_URL: 'https://hub.example', TM_CLIENT_SECRET: SECRET, TM_CLIENT_UPDATE_GITHUB_REPO: 'example-org/token-monitor' }),
+    /build it with TM_CLIENT_NO_HUB=1/
+  );
+  assert.throws(() => resolve({
+    TM_CLIENT_NO_HUB: '1',
+    TM_CLIENT_UPDATE_GITHUB_REPO: 'example-org/token-monitor',
+    TM_CLIENT_UPDATE_PROJECT_URL: 'https://gitlab.example.com/tools/token-monitor',
+    TM_CLIENT_UPDATE_PROJECT_ID: '42'
+  }), /not both/);
+});
+
+test('a build without a hub seeds the first launch unconnected', () => {
+  tempDir((root) => {
+    const dir = path.join(root, 'Token Monitor');
+    const defaults = { syncUploadIntervalMs: 1800000, startAtLogin: true, ownDeviceOnly: true };
+    assert.equal(seedFirstRun({ dir, defaults, randomUUID: () => '11111111-2222-3333-4444-555555555555' }), true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8')), {
+      deviceId: '11111111-2222-3333-4444-555555555555',
+      syncUploadIntervalMs: 1800000,
+      automaticAppUpdates: false,
+      startAtLogin: true
+    });
+    const store = { readDocument: () => assert.fail('no key to store'), writeDocument: () => assert.fail('no key to store') };
+    assert.equal(applyHubOnce({ dir, defaults, store, seeded: true }), false);
+    assert.equal(applyHubOnce({ dir, defaults, store }), false);
+  });
 });
 
 test('the first launch writes connected settings; an existing settings.json is left alone', () => {
@@ -590,6 +662,27 @@ test('the devices list names a device by its hostname before its id', () => {
 
 // When this fails after an upstream update, re-read the App Updates header in
 // upstream's renderer (index.html, i18n.js, app.js) and update UPSTREAM_PATCHES.
+test('a build that updates from GitHub names GitHub releases and still makes the name a link', () => {
+  const files = ['src/electron/renderer/app.js', 'src/electron/renderer/index.html', 'src/electron/renderer/i18n.js'];
+  tempDir((dir) => {
+    for (const file of files) {
+      const target = path.join(dir, ...file.split('/'));
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(upstream(file), target);
+    }
+    const patches = upstreamPatches('GitHub');
+    assert.equal(patches.length, UPSTREAM_PATCHES.length);
+    assert.deepEqual(patchUpstream(dir, patches), files);
+    const text = files.map((file) => fs.readFileSync(path.join(dir, ...file.split('/')), 'utf8')).join('\n');
+    assert.doesNotMatch(text, /GitLab releases/);
+    assert.equal(text.split('GitHub releases').length - 1, 6);
+    assert.ok(text.includes('<button id="appUpdateSourceLink" type="button" class="inline-link" data-i18n="settings.appUpdate.source">GitHub releases</button>'));
+    assert.ok(text.includes("getElementById('appUpdateSourceLink')"));
+  });
+  // The GitLab build's patches are the default.
+  assert.deepEqual(upstreamPatches('GitLab'), UPSTREAM_PATCHES);
+});
+
 test('the App Updates header names the GitLab Release as the update source and links to it', () => {
   const files = ['src/electron/renderer/app.js', 'src/electron/renderer/index.html', 'src/electron/renderer/i18n.js'];
   const read = (dir, file) => fs.readFileSync(path.join(dir, ...file.split('/')), 'utf8');
@@ -729,6 +822,13 @@ test('the release page of a company update and the Releases list open on GitLab;
     corpReleasePageUrl('https://github.com/Javis603/token-monitor/releases/tag/v0.63.1-corp.3', releases),
     `${releases}/client-v0.63.1-corp.3`
   );
+  // A GitHub Release page has /tag/ before the tag.
+  const github = 'https://github.com/example-org/token-monitor/releases';
+  assert.equal(
+    corpReleasePageUrl('https://github.com/Javis603/token-monitor/releases/tag/v0.63.1-corp.3', github),
+    `${github}/tag/client-v0.63.1-corp.3`
+  );
+  assert.equal(corpReleasePageUrl('https://github.com/Javis603/token-monitor/releases', github), github);
   assert.equal(corpReleasePageUrl('https://github.com/Javis603/token-monitor/releases', releases), releases);
   assert.equal(corpReleasePageUrl('https://github.com/Javis603/token-monitor/releases/', releases), releases);
   assert.equal(
@@ -966,6 +1066,53 @@ test('the Release links, checks and lists the installers under the names the bui
   assert.ok(ci.includes('- dist/client/*.zip\n'), 'the mac build keeps its zip');
   assert.match(ci, /for file in [^;]*dist\/client\/\*\.zip[^;]*; do/);
   assert.equal(installerFileName('win', '0.63.1-corp.4'), 'Token-Monitor_0.63.1-corp.4_x64-setup.exe');
+});
+
+// The GitHub Release (.github/workflows/client-release.yml) is public: its
+// installers carry no hub URL or client key, the apps update from its latest
+// Release, and it attaches every file latest*.yml names.
+test('the GitHub Release builds installers without a hub, from client-v tags only, under the names the build gives them', () => {
+  const workflow = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'client-release.yml'), 'utf8');
+  const notes = fs.readFileSync(path.join(ROOT, 'packaging', 'client-release-notes.github.md'), 'utf8');
+  assert.ok(workflow.includes("on:\n  push:\n    tags: ['client-v*']\n"), 'only a client-v tag starts it');
+  assert.ok(workflow.includes("      TM_CLIENT_NO_HUB: '1'\n"));
+  assert.ok(workflow.includes('      TM_CLIENT_UPDATE_GITHUB_REPO: ${{ github.repository }}\n'));
+  assert.ok(workflow.includes('      TM_CLIENT_VERSION: ${{ github.ref_name }}\n'));
+  // Nothing that could put a key or the hub into a public installer.
+  assert.doesNotMatch(workflow, /TM_CLIENT_SECRET|TM_CLIENT_HUB_URL|TOKEN_MONITOR_SECRET|secrets\.|set -x/);
+  assert.match(workflow, /^ {2}build:\n[\s\S]*?^ {4}needs: verify$/m, 'the builds wait for verify');
+  assert.ok(workflow.includes('      - run: npm run verify\n'));
+  assert.match(workflow, /^ {4}permissions:\n {6}contents: write$/m);
+  assert.equal(workflow.split('contents: write').length - 1, 1, 'only the release job can write');
+  for (const platform of ['win', 'mac', 'linux']) {
+    const file = installerFileName(platform, '@VERSION@');
+    assert.ok(notes.includes(`[${file}](@DOWNLOADS@/${file})`), `the notes list ${file}`);
+  }
+  assert.ok(workflow.includes(`check_update_info latest.yml "${installerFileName('win', '${CLIENT_VERSION}')}"`));
+  assert.ok(workflow.includes(`check_update_info latest-linux.yml "${installerFileName('linux', '${CLIENT_VERSION}')}"`));
+  const zip = installerFileName('mac', '${CLIENT_VERSION}').replace(/\.dmg$/, '.zip');
+  assert.ok(workflow.includes(`check_update_info latest-mac.yml "${zip}" "  - url"`));
+  for (const glob of ['*.exe', '*.dmg', '*.zip', '*.AppImage', 'latest*.yml']) {
+    assert.ok(workflow.includes(`            dist/client/${glob}\n`), `the build keeps ${glob}`);
+  }
+  // Every placeholder in the notes is one the workflow fills in.
+  const filled = [...workflow.matchAll(/-e "s\|@([A-Z]+)@\|/g)].map((match) => match[1]);
+  assert.deepEqual(filled, ['VERSION', 'DOWNLOADS']);
+  assert.deepEqual([...new Set([...notes.matchAll(/@([A-Z]+)@/g)].map((match) => match[1]))].sort(), [...filled].sort());
+  assert.ok(workflow.includes(`if grep -n '@[A-Z][A-Z]*@' release-notes.md; then`));
+  // The apps read /releases/latest/download/: the Release has to be the latest.
+  assert.match(workflow, /gh release create "\$TAG" dist\/client\/\* \\[\s\S]*--verify-tag \\\n {12}--latest\n/);
+  // The notes say the same in both languages, and how to connect to a hub.
+  const [top, ...rest] = notes.split('\n');
+  assert.equal(top, '[English version ↓](#english)');
+  const [zh, en, extra] = rest.join('\n').split('\n# English\n');
+  assert.equal(extra, undefined);
+  assert.doesNotMatch(en, /[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]/);
+  const facts = (text) => [...text.matchAll(/`[^`\n]+`|\]\([^)]+\)|\*\*@VERSION@\*\*/g)].map((match) => match[0]).sort();
+  assert.ok(facts(zh).length >= 5);
+  assert.deepEqual(facts(en), facts(zh));
+  assert.ok(zh.includes('「多裝置同步」，選「連接到 Hub」'));
+  assert.ok(en.includes('"Multi-device Sync" and choose "Connect to a hub"'));
 });
 
 // The Release notes are in Chinese, then in English after `# English`, which
