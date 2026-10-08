@@ -1,96 +1,91 @@
 # Open Token Monitor
 
-[繁體中文](README.zh-TW.md)
+**繁體中文** | [English](README.en.md)
 
-A self-hosted team edition of [Token Monitor](https://github.com/Javis603/token-monitor) for organisations: track AI coding tool usage (Claude Code, Codex, Cursor, Copilot and more) across every employee's machine, in one hub with a database, an organisation chart, a dashboard and reports.
+[Token Monitor](https://github.com/Javis603/token-monitor) 的自架團隊版，給組織使用。它把每位員工電腦上 AI coding 工具（Claude Code、Codex、Cursor、Copilot 等）的用量，集中到同一個 hub。hub 有資料庫、組織架構、dashboard 與報表。
 
-Upstream Token Monitor is a desktop widget with an optional hub. This repository keeps upstream unchanged and adds what a company deployment needs on top of it:
+上游 Token Monitor 是桌面小工具，hub 是選用的。這個 repo 不改上游，只在上面加上公司部署需要的部分：
 
-- **Hub overlay** (`hub/`): PostgreSQL storage, admin, client and API-token permission tiers, organisation import from HR spreadsheets (company → BU → department → team), automatic device ownership, a usage dashboard, a reporting API, backups and history purging. It runs in front of upstream's own hub.
-- **Electron client packaging** (`client/`, `packaging/`): upstream's desktop app, packaged with your hub URL and client key preset. On first run it connects to your hub, uploads every 30 minutes and turns on launch at login.
-- **Rust/Tauri client** (`tauri/`): a lighter client written in Rust. It uploads exactly what upstream's client uploads, field for field, and also has a headless `tm-agent`.
+- **hub overlay**（`hub/`）：
+  - PostgreSQL 儲存。
+  - 管理員、client、API token 三種權限。
+  - 從人事公告 xlsx 匯入組織，並自動判定裝置的主人；dashboard 依「公司 → 部門」兩級篩選與比較，團隊算在所屬部門。
+  - 用量 dashboard、報表 API、備份與刪除歷史資料。
+  - 它疊在上游的 hub 前面執行。
+- **Electron 用戶端打包**（`client/`、`packaging/`）：上游的桌面 app，打包時預填你的 hub 網址與 client 金鑰。第一次開啟就會連上 hub、每 30 分鐘上傳一次，並設定開機自動啟動。
+- **Rust/Tauri 用戶端**（`tauri/`）：用 Rust 寫的輕量用戶端。它上傳的內容和上游用戶端逐欄相同，另外提供不需要畫面的 `tm-agent`。
 
-The docs are in Traditional Chinese.
+## 畫面
 
-## Screenshots
+hub 的用量 dashboard、管理頁與安裝說明。資料是 `npm run smoke:hub` 產生的假資料。
 
-The hub's dashboard, admin page and install guide, with made-up data from `npm run smoke:hub`.
+**用量 dashboard**：總量與上期比較、趨勢、模型分布與各公司、各部門的用量，可以依期間、工具、公司與部門篩選。
 
-**Usage dashboard:** totals compared with the previous period, trends, model mix and usage by company, filtered by period, tool and organisation unit.
+![用量 dashboard](docs/images/dashboard-overview.zh-TW.png)
 
-![Usage dashboard](docs/images/dashboard-overview.en.png)
-
-| Accounts | Devices and AI tool limits |
+| 帳號排行 | 裝置與 AI 工具額度 |
 |---|---|
-| ![Account ranking](docs/images/dashboard-accounts.en.png) | ![Devices](docs/images/dashboard-devices.en.png) |
+| ![帳號排行](docs/images/dashboard-accounts.zh-TW.png) | ![裝置](docs/images/dashboard-devices.zh-TW.png) |
 
-| Admin: HR announcement import | Install guide (`/install`) |
+| 管理：匯入人事公告 | 安裝說明（`/install`） |
 |---|---|
-| ![Admin](docs/images/admin.en.png) | ![Install guide](docs/images/install.en.png) |
+| ![管理](docs/images/admin.zh-TW.png) | ![安裝說明](docs/images/install.zh-TW.png) |
 
-## Layout
+## 快速開始
 
-```
-upstream/     upstream token-monitor (git subtree, pinned to a release tag, never edited here)
-hub/          the hub overlay        docker/  deploy/   container image and deployment scripts
-client/       Electron client entry  packaging/          client build (electron-builder)
-tauri/        Rust/Tauri client      scripts/            release and upstream tools
-docs/         documentation          tests/              node --test suites
-```
-
-## Quick start
-
-Requires Node.js 22.15 or newer, plus Docker for the containerised hub.
+需要 Node.js 22.15 以上；用容器跑 hub 時另外需要 Docker。
 
 ```bash
 git clone https://github.com/markku636/open-token-monitor.git
 cd open-token-monitor
 npm ci
-cp .env.example .env          # set TOKEN_MONITOR_SECRET, TOKEN_MONITOR_CLIENT_SECRETS, POSTGRES_PASSWORD, TOKEN_MONITOR_DB_PASSWORD
-docker build -f docker/Dockerfile -t token-monitor-hub .     # the Compose file never pulls the hub image
-docker compose -f docker/compose.yml --env-file .env up -d   # hub + PostgreSQL on port 80
-# or, for development against the JSON store: npm run hub
-# or, to look around with made-up data and no Docker: npm run smoke:hub
+cp .env.example .env          # 填 TOKEN_MONITOR_SECRET、TOKEN_MONITOR_CLIENT_SECRETS、POSTGRES_PASSWORD、TOKEN_MONITOR_DB_PASSWORD
+docker build -f docker/Dockerfile -t token-monitor-hub .     # Compose 不會自己拉 hub 映像
+docker compose -f docker/compose.yml --env-file .env up -d   # hub + PostgreSQL，port 80
+# 開發時也可以用 JSON 檔：npm run hub
+# 不用 Docker、先用假資料看看：npm run smoke:hub
 ```
 
-Make each key and password a long random hex value: `node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"`. Then open <http://localhost/>, choose **Admin** and paste `TOKEN_MONITOR_SECRET`. If port 80 is taken, set `TOKEN_MONITOR_HOST_PORT` in `.env`.
+金鑰與密碼都用長的隨機 hex：`node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"`。接著開 <http://localhost/>，按「管理員」貼上 `TOKEN_MONITOR_SECRET`。port 80 被佔用時，在 `.env` 設 `TOKEN_MONITOR_HOST_PORT`。
 
-Then, depending on what you need:
+接下來看你要做什麼：
 
-| To | Read |
+| 要做的事 | 文件 |
 |---|---|
-| Configure and run the hub | [docs/hub.zh-TW.md](docs/hub.zh-TW.md), [docs/docker.md](docs/docker.md), [docs/postgres.zh-TW.md](docs/postgres.zh-TW.md) |
-| Build the Electron client for your organisation | [docs/client-build.zh-TW.md](docs/client-build.zh-TW.md), [docs/client-setup.zh-TW.md](docs/client-setup.zh-TW.md) |
-| Build or develop the Rust client | [tauri/README.md](tauri/README.md) |
-| Pull hub data from other systems | [docs/reports-api.zh-TW.md](docs/reports-api.zh-TW.md) |
-| Put your own logo on the client | [client/README.md](client/README.md) |
+| 設定與執行 hub | [docs/hub.zh-TW.md](docs/hub.zh-TW.md)、[docs/docker.md](docs/docker.md)、[docs/postgres.zh-TW.md](docs/postgres.zh-TW.md) |
+| 替自己的組織打包 Electron 用戶端 | [docs/client-build.zh-TW.md](docs/client-build.zh-TW.md)、[docs/client-setup.zh-TW.md](docs/client-setup.zh-TW.md) |
+| 打包或開發 Rust 用戶端 | [tauri/README.md](tauri/README.md) |
+| 讓其他系統讀 hub 的資料 | [docs/reports-api.zh-TW.md](docs/reports-api.zh-TW.md) |
+| 換成自己的 logo | [client/README.md](client/README.md) |
 
-Each organisation builds its own client installer, because the installer carries your hub's address and client key.
+安裝檔帶著 hub 網址與 client 金鑰，所以每個組織要自己打包用戶端。
 
-## Keeping up with upstream
+## 跟上上游
 
-`upstream/` is a squashed git subtree of [Javis603/token-monitor](https://github.com/Javis603/token-monitor). Nothing in this repository edits it, and `npm run verify` fails if anything does. Every seam where this repository copies, patches or ports upstream code is either covered by a test or listed in [upstream-touchpoints.json](upstream-touchpoints.json). That keeps upstream updates mechanical, which also makes them a good task for a coding agent.
-
-```bash
-npm run upstream:status              # pinned release vs. newest upstream release
-npm run upstream:update -- latest    # pull it, run verify, write tmp/upstream-impact.md
-npm run upstream:impact              # checklist: seams, overlay files and tauri/ files the update touches
-```
-
-- **Manual steps:** [AGENTS.md](AGENTS.md), "升級上游". Coding agents (Claude Code, Codex and others) follow that file.
-- **Claude Code:** the repository ships an [`/upstream-update`](.claude/skills/upstream-update/SKILL.md) skill that runs the whole procedure.
-- **On GitHub:** [upstream-watch](.github/workflows/upstream-watch.yml) checks for a new upstream release every Monday and opens a pull request with the impact checklist. Comment `@claude` on that pull request to have Claude finish the update ([claude.yml](.github/workflows/claude.yml); needs a `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` repository secret).
-
-## Development
+`upstream/` 是 [Javis603/token-monitor](https://github.com/Javis603/token-monitor) 的 git subtree（`--squash`），本 repo 從不修改它；有人改了，`npm run verify` 就會失敗。本 repo 每一處複製、修補或移植上游程式的地方，不是有測試守著，就是列在 [upstream-touchpoints.json](upstream-touchpoints.json)。所以升級上游可以照固定步驟做，很適合交給 AI。
 
 ```bash
-npm run verify                         # upstream check + lint + tests (hub overlay)
-cd tauri && npm ci && npm run verify   # Rust client: frontend build, vitest, cargo test, clippy
-npm --prefix tauri run test:compat     # Rust client vs. upstream's JavaScript and the overlay hub
+npm run upstream:status              # 目前釘住的版本與上游最新版
+npm run upstream:update -- latest    # 拉最新版、跑 verify、寫出 tmp/upstream-impact.md
+npm run upstream:impact              # 這次更新碰到的接縫、overlay 檔案與 tauri/ 檔案清單
 ```
 
-Conventions and the rules that tests enforce are in [AGENTS.md](AGENTS.md).
+- **手動步驟**：寫在 [AGENTS.md](AGENTS.md)「升級上游」。Claude Code、Codex 等 coding agent 都會照這份檔案做。
+- **Claude Code**：repo 附了 [`/upstream-update`](.claude/skills/upstream-update/SKILL.md) skill，一次跑完整個流程。
+- **GitHub**：
+  - [upstream-watch](.github/workflows/upstream-watch.yml) 每週一檢查上游，有新版就開 PR，內文附檢查清單。
+  - 在那個 PR 留言 `@claude`，Claude 就會接手完成升級（[claude.yml](.github/workflows/claude.yml)）。這需要在 repo 設定 `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY` secret。
 
-## License
+## 開發
 
-[MIT](LICENSE). Upstream Token Monitor is © Javis, MIT ([upstream/LICENSE](upstream/LICENSE)); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). This project is not affiliated with or endorsed by the upstream authors.
+```bash
+npm run verify                         # 上游檢查 + lint + 測試（hub overlay）
+cd tauri && npm ci && npm run verify   # Rust 用戶端：前端 build、vitest、cargo test、clippy
+npm --prefix tauri run test:compat     # Rust 用戶端與上游 JavaScript、overlay hub 的相容測試
+```
+
+慣例與測試會檢查的規則見 [AGENTS.md](AGENTS.md)。
+
+## 授權
+
+[MIT](LICENSE)。上游 Token Monitor 為 © Javis，MIT 授權（[upstream/LICENSE](upstream/LICENSE)），見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。本專案與上游作者沒有隸屬或背書關係。
