@@ -17,7 +17,7 @@
 
 ## 畫面
 
-hub 的用量 dashboard、管理頁與安裝說明。資料是 `npm run smoke:hub` 產生的假資料。
+hub 的用量 dashboard、組織名單與安裝說明。資料是 `npm run smoke:hub` 產生的假資料。
 
 **用量 dashboard**：總量與上期比較、趨勢、模型分布與各公司、各部門的用量，可以依期間、工具、公司與部門篩選。
 
@@ -27,9 +27,15 @@ hub 的用量 dashboard、管理頁與安裝說明。資料是 `npm run smoke:hu
 |---|---|
 | ![帳號排行](docs/images/dashboard-accounts.zh-TW.png) | ![裝置](docs/images/dashboard-devices.zh-TW.png) |
 
-| 管理：組織名單 | 安裝說明（`/install`） |
+**組織名單**：每家公司一份名單（員工編號、姓名、Email、部門），直接在網頁上編輯，或下載 Excel 填好再拖回來；儲存前先看差異。
+
+| 網頁上編輯名單 | 預覽差異後匯入 |
 |---|---|
-| ![管理](docs/images/admin.zh-TW.png) | ![安裝說明](docs/images/install.zh-TW.png) |
+| ![組織名單](docs/images/admin.zh-TW.png) | ![預覽差異](docs/images/admin-roster-preview.zh-TW.png) |
+
+**安裝說明**（`/install`）：員工照著下載、安裝用戶端。
+
+![安裝說明](docs/images/install.zh-TW.png)
 
 ## 快速開始
 
@@ -47,6 +53,14 @@ docker compose -f docker/compose.yml --env-file .env up -d   # hub + PostgreSQL�
 ```
 
 金鑰與密碼都用長的隨機 hex：`node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"`。接著開 <http://localhost/>，按「管理員」貼上 `TOKEN_MONITOR_SECRET`。port 80 被佔用時，在 `.env` 設 `TOKEN_MONITOR_HOST_PORT`。
+
+登入後到管理頁的「組織名單」建立名單，不需要人事系統的檔案：
+
+1. 輸入公司代碼（英文字母、數字與 `-`，例如 `ACME`）。
+2. 按「編輯名單」直接填，或按「下載 Excel」拿範本（欄位是員工編號、姓名、Email、部門），填好拖回框裡。從 Excel 複製多列也可以直接貼到網頁的表格。
+3. 按「預覽變更」（Excel 是「預覽 Excel」）看差異，確認後按「匯入」。
+
+之後名單有變動就照同樣的步驟更新；名單上沒有的人會停用，不會刪除。員工電腦上的用戶端回報的 email 對得上名單時，裝置會自動歸給那個人。
 
 接下來看你要做什麼：
 

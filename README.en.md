@@ -14,7 +14,7 @@ The docs are in Traditional Chinese.
 
 ## Screenshots
 
-The hub's dashboard, admin page and install guide, with made-up data from `npm run smoke:hub`.
+The hub's dashboard, org roster and install guide, with made-up data from `npm run smoke:hub`.
 
 **Usage dashboard:** totals compared with the previous period, trends, model mix and usage by company and department, filtered by period, tool, company and department.
 
@@ -24,9 +24,15 @@ The hub's dashboard, admin page and install guide, with made-up data from `npm r
 |---|---|
 | ![Account ranking](docs/images/dashboard-accounts.en.png) | ![Devices](docs/images/dashboard-devices.en.png) |
 
-| Admin: org roster | Install guide (`/install`) |
+**Org roster:** one roster per company (employee no., name, email, department), edited on the page or downloaded as Excel, filled in and dropped back; the changes are previewed before they are saved.
+
+| Editing the roster on the page | Previewing the changes before the import |
 |---|---|
-| ![Admin](docs/images/admin.en.png) | ![Install guide](docs/images/install.en.png) |
+| ![Org roster](docs/images/admin.en.png) | ![Preview](docs/images/admin-roster-preview.en.png) |
+
+**Install guide** (`/install`): what employees follow to download and install the client.
+
+![Install guide](docs/images/install.en.png)
 
 ## Layout
 
@@ -54,6 +60,14 @@ docker compose -f docker/compose.yml --env-file .env up -d   # hub + PostgreSQL 
 ```
 
 Make each key and password a long random hex value: `node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"`. Then open <http://localhost/>, choose **Admin** and paste `TOKEN_MONITOR_SECRET`. If port 80 is taken, set `TOKEN_MONITOR_HOST_PORT` in `.env`.
+
+Once signed in, build the org roster under **Org roster** on the admin page; no file from an HR system is needed:
+
+1. Type a company code (letters, digits and `-`, e.g. `ACME`).
+2. Choose **Edit roster** and fill it in, or **Download Excel** for the template (employee no., name, email, department), fill it in and drop it back. Rows copied from Excel can be pasted straight into the table on the page.
+3. Choose **Preview changes** (**Preview the Excel** for a file), check the changes and choose **Import**.
+
+Update it the same way whenever the roster changes; people no longer on it are deactivated, not deleted. A device goes to a person automatically when the email its client reports is on the roster.
 
 Then, depending on what you need:
 
