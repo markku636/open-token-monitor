@@ -4,7 +4,8 @@
 //! 這裡只放能在 `--no-default-features` 下單元測試的部分。
 //!
 //! feed 是公司 hub 的 `/updates/latest.json`（monorepo 根目錄 overlay 的 `hub/releases.js`
-//! 提供）。安裝檔以 minisign 驗章，公鑰在打包時由 build-installer.ps1 以 `--config`
+//! 提供）；GitHub 發行的安裝檔（`build-installer.ps1 -GitHubRepo`）改用該 repo 最新 Release 的
+//! `latest.json`。安裝檔以 minisign 驗章，公鑰在打包時由 build-installer.ps1 以 `--config`
 //! 寫進 `plugins.updater.pubkey`：repo 裡的 tauri.conf.json 只有空字串，所以沒有公鑰的
 //! 建置（`tauri dev`、本機模式安裝檔）一律停用更新。
 
@@ -15,6 +16,32 @@ use url::Url;
 
 /// hub 上的 Tauri updater feed 路徑（對應 overlay `hub/releases.js` 的 `/updates/`）。
 pub const FEED_PATH: &str = "updates/latest.json";
+
+/// GitHub Release 裡 Tauri updater feed 的檔名（.github/workflows/client-release.yml 上傳）。
+pub const GITHUB_FEED_NAME: &str = "latest.json";
+
+/// `owner/repo`：GitHub 帳號與 repo 名稱只有英數、點、底線與連字號，不以點或連字號開頭。
+pub fn is_github_repo(repo: &str) -> bool {
+    let mut parts = repo.split('/');
+    let ok = |p: Option<&str>| {
+        p.is_some_and(|p| {
+            !p.is_empty()
+                && p.len() <= 100
+                && !p.starts_with(['.', '-'])
+                && p.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        })
+    };
+    ok(parts.next()) && ok(parts.next()) && parts.next().is_none()
+}
+
+/// GitHub 發行的版本頁：repo 最新的 Release（Tauri 版號和 Release 的 tag 不同，不能指到單一版本）。
+pub fn github_release_page_url(repo: &str) -> Option<Url> {
+    if !is_github_repo(repo) {
+        return None;
+    }
+    Url::parse(&format!("https://github.com/{repo}/releases/latest")).ok()
+}
 
 /// hub 上列出核准版本的頁面（`/downloads/releases`；本 repo 根目錄的 hub 目前沒有提供）。
 /// 版本說明連結開這頁，錨點是 `v<版本>`，對應頁面上每個版本的 `<section id="v…">`。
@@ -54,7 +81,21 @@ pub fn feed_url(
     debug_build: bool,
     pubkey: &str,
     hub_url: Option<&str>,
+    github_repo: Option<&str>,
 ) -> Result<Url, DisabledReason> {
+    // GitHub 發行：不帶 hub，從 repo 最新的 Release 更新；同樣要通過內建公鑰的驗章。
+    if let Some(repo) = github_repo.filter(|r| is_github_repo(r)) {
+        if debug_build {
+            return Err(DisabledReason::DebugBuild);
+        }
+        if pubkey.trim().is_empty() {
+            return Err(DisabledReason::NoPublicKey);
+        }
+        return Url::parse(&format!(
+            "https://github.com/{repo}/releases/latest/download/{GITHUB_FEED_NAME}"
+        ))
+        .map_err(|_| DisabledReason::InvalidHub);
+    }
     if !corp_build {
         return Err(DisabledReason::DevBuild);
     }
@@ -205,36 +246,43 @@ mod tests {
 
     #[test]
     fn feed_follows_the_effective_hub() {
-        let url = feed_url(true, false, "pk", Some("https://tokens.example.internal/")).unwrap();
+        let url = feed_url(
+            true,
+            false,
+            "pk",
+            Some("https://tokens.example.internal/"),
+            None,
+        )
+        .unwrap();
         assert_eq!(
             url.as_str(),
             "https://tokens.example.internal/updates/latest.json"
         );
         // hub 掛在子路徑時 feed 也在子路徑底下（反向代理常見）。
-        let url = feed_url(true, false, "pk", Some("https://proxy.example/tm")).unwrap();
+        let url = feed_url(true, false, "pk", Some("https://proxy.example/tm"), None).unwrap();
         assert_eq!(url.as_str(), "https://proxy.example/tm/updates/latest.json");
     }
 
     #[test]
     fn builds_without_a_key_or_hub_never_update() {
         assert_eq!(
-            feed_url(false, false, "pk", Some("https://h")),
+            feed_url(false, false, "pk", Some("https://h"), None),
             Err(DisabledReason::DevBuild)
         );
         assert_eq!(
-            feed_url(true, true, "pk", Some("https://h")),
+            feed_url(true, true, "pk", Some("https://h"), None),
             Err(DisabledReason::DebugBuild)
         );
         assert_eq!(
-            feed_url(true, false, "  ", Some("https://h")),
+            feed_url(true, false, "  ", Some("https://h"), None),
             Err(DisabledReason::NoPublicKey)
         );
         assert_eq!(
-            feed_url(true, false, "pk", None),
+            feed_url(true, false, "pk", None, None),
             Err(DisabledReason::NoHub)
         );
         assert_eq!(
-            feed_url(true, false, "pk", Some("ftp://h")),
+            feed_url(true, false, "pk", Some("ftp://h"), None),
             Err(DisabledReason::InvalidHub)
         );
     }
@@ -289,6 +337,55 @@ mod tests {
         ] {
             assert_eq!(release_page_url(hub, Some("0.2.0")), None, "{hub:?}");
         }
+    }
+
+    #[test]
+    fn github_builds_update_from_the_latest_release() {
+        let url = feed_url(
+            false,
+            false,
+            "pk",
+            None,
+            Some("markku636/open-token-monitor"),
+        )
+        .unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://github.com/markku636/open-token-monitor/releases/latest/download/latest.json"
+        );
+        // hub 的覆寫不會把 GitHub 版的 feed 換走
+        let url = feed_url(false, false, "pk", Some("https://h"), Some("o/r")).unwrap();
+        assert_eq!(url.host_str(), Some("github.com"));
+        assert_eq!(
+            feed_url(false, false, " ", None, Some("o/r")),
+            Err(DisabledReason::NoPublicKey)
+        );
+        assert_eq!(
+            feed_url(false, true, "pk", None, Some("o/r")),
+            Err(DisabledReason::DebugBuild)
+        );
+        // 格式不對的 repo 當作沒有：回到 hub 規則
+        assert_eq!(
+            feed_url(false, false, "pk", None, Some("o/r/x")),
+            Err(DisabledReason::DevBuild)
+        );
+    }
+
+    #[test]
+    fn github_repo_names_are_checked() {
+        for ok in ["o/r", "markku636/open-token-monitor", "a.b/c_d-e"] {
+            assert!(is_github_repo(ok), "{ok}");
+        }
+        for bad in [
+            "", "o", "o/", "/r", "o/r/x", "-o/r", "o/.r", "o r/x", "o/r?x", "../r",
+        ] {
+            assert!(!is_github_repo(bad), "{bad}");
+        }
+        assert_eq!(
+            github_release_page_url("o/r").map(String::from).as_deref(),
+            Some("https://github.com/o/r/releases/latest")
+        );
+        assert_eq!(github_release_page_url("o/r/x"), None);
     }
 
     #[test]

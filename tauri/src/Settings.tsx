@@ -90,7 +90,9 @@ function OwnerEmailField({ s }: { s: SettingsView }) {
 
 function HubSection({ s }: { s: SettingsView }) {
   const applySettings = useApp((x) => x.applySettings);
-  const [open, setOpen] = useState(false);
+  // 沒有內建 hub 的安裝檔（GitHub 發行、本機模式）要使用者自己填，輸入欄一開始就展開。
+  const builtIn = !!s.hub.bakedUrl;
+  const [open, setOpen] = useState(!builtIn);
   const [url, setUrl] = useState(s.hubUrl);
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
@@ -120,9 +122,13 @@ function HubSection({ s }: { s: SettingsView }) {
       </Field>
       <OwnerEmailField s={s} />
       <div className="py-2.5">
-        <button type="button" className="text-xs text-accent hover:underline" onClick={() => setOpen(!open)}>
-          {open ? t("收起") : t("覆寫位置或金鑰（金鑰輪替時使用）")}
-        </button>
+        {builtIn ? (
+          <button type="button" className="text-xs text-accent hover:underline" onClick={() => setOpen(!open)}>
+            {open ? t("收起") : t("覆寫位置或金鑰（金鑰輪替時使用）")}
+          </button>
+        ) : (
+          <p className="text-xs text-fg/70">{t("填入公司 hub 的位置與 client 金鑰（向 IT 索取），這台的用量就會上傳到 hub。")}</p>
+        )}
         {open && (
           <div className="mt-2 space-y-2">
             <input
@@ -134,7 +140,7 @@ function HubSection({ s }: { s: SettingsView }) {
             <input
               className="w-full rounded-sm border border-fg/15 bg-inset px-2 py-1 font-mono text-xs"
               type="password"
-              placeholder={t("新的 client secret（留空則不變）")}
+              placeholder={builtIn || s.hub.secretMasked ? t("新的 client secret（留空則不變）") : t("client 金鑰")}
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
             />
@@ -146,12 +152,14 @@ function HubSection({ s }: { s: SettingsView }) {
               >
                 {t("套用")}
               </Button>
-              <Button disabled={busy} onClick={() => void run({ url: "", secret: "" }, t("已還原內建值"))}>
-                {t("還原內建值")}
+              <Button disabled={busy} onClick={() => void run({ url: "", secret: "" }, builtIn ? t("已還原內建值") : t("已清除"))}>
+                {builtIn ? t("還原內建值") : t("清除")}
               </Button>
             </div>
             <p className="text-xs text-fg/45">
-              {t("金鑰存在 Windows 認證管理員，不寫入設定檔。只有 hub 更換金鑰、而這台還沒裝新版時才需要。")}
+              {builtIn
+                ? t("金鑰存在 Windows 認證管理員，不寫入設定檔。只有 hub 更換金鑰、而這台還沒裝新版時才需要。")
+                : t("金鑰存在 Windows 認證管理員，不寫入設定檔。")}
             </p>
           </div>
         )}

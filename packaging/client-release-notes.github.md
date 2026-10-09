@@ -8,6 +8,8 @@
 | **Mac，Apple 晶片（M1、M2、M3、M4…）** | [Token-Monitor_@VERSION@_aarch64.dmg](@DOWNLOADS@/Token-Monitor_@VERSION@_aarch64.dmg) |
 | **Linux（x64，例如 Ubuntu）** | [Token-Monitor_@VERSION@_amd64.AppImage](@DOWNLOADS@/Token-Monitor_@VERSION@_amd64.AppImage) |
 
+Windows 也可以改用比較輕巧的 **Rust 版**（@RUSTVERSION@）：[Token-Monitor-Rust_@RUSTVERSION@_x64-setup.exe](@DOWNLOADS@/Token-Monitor-Rust_@RUSTVERSION@_x64-setup.exe)。兩個版本擇一安裝即可。
+
 不確定是哪一種 Mac：點螢幕左上角的蘋果圖示 →「關於這台 Mac」，「晶片」寫 Apple M… 就下載上面的 dmg。寫「處理器 Intel」的 Mac 目前不支援。
 
 ## 安裝
@@ -27,6 +29,8 @@
 3. 填入 Hub URL 與密鑰。
 
 之後每 30 分鐘把用量上傳到 hub，開機也會自動啟動。
+
+Rust 版：按 ⚙ 打開設定，在「公司 hub」填入位置與 client 金鑰，按「套用」。
 
 ## 已經裝了舊版？
 
@@ -50,6 +54,8 @@ app 會自己檢查這裡的最新版：有新版時 app 裡會提示，按「�
 | **Mac with Apple silicon (M1, M2, M3, M4…)** | [Token-Monitor_@VERSION@_aarch64.dmg](@DOWNLOADS@/Token-Monitor_@VERSION@_aarch64.dmg) |
 | **Linux (x64, such as Ubuntu)** | [Token-Monitor_@VERSION@_amd64.AppImage](@DOWNLOADS@/Token-Monitor_@VERSION@_amd64.AppImage) |
 
+On Windows you can use the lighter **Rust edition** (@RUSTVERSION@) instead: [Token-Monitor-Rust_@RUSTVERSION@_x64-setup.exe](@DOWNLOADS@/Token-Monitor-Rust_@RUSTVERSION@_x64-setup.exe). Install one of the two.
+
 Not sure which Mac you have? Click the Apple menu in the top-left corner of the screen → "About This Mac". If "Chip" says Apple M…, download the dmg above. Macs that list an Intel "Processor" are not supported yet.
 
 ## Install
@@ -69,6 +75,8 @@ This installer **carries no hub address or key**. Set it up once after installin
 3. Enter the Hub URL and the secret.
 
 From then on it uploads your usage to the hub every 30 minutes and starts by itself every time you turn on the computer.
+
+Rust edition: click ⚙ to open Settings, enter the address and client key under "Company hub", and click "Apply".
 
 ## Already have an older version?
 

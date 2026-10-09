@@ -25,6 +25,9 @@
     -SigningKeyFile 指向私鑰，同目錄的 .pub 是公鑰；公鑰在打包時以 --config 寫進
     plugins.updater.pubkey，repo 裡不放任何金鑰。私鑰有密碼時先設 TAURI_SIGNING_PRIVATE_KEY_PASSWORD。
     私鑰遺失 = 已安裝的 client 再也無法自動更新（只能手動重裝），務必備份。
+    GitHub 發行（-GitHubRepo owner/repo）：不帶 hub 與 secret（使用者在設定裡自己填），檔名是
+    Token-Monitor-Rust_<版本>_x64-setup.exe，從該 repo 最新 Release 的 latest.json 自動更新；
+    -DownloadBase 是這一版 Release 的下載位置（.github/workflows/client-release.yml 會帶）。
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\build-installer.ps1
@@ -75,7 +78,11 @@ param(
     [switch]$SkipVerify,
 
     # 結束時不等待按鍵（CI / 自動化用）。
-    [switch]$NoPause
+    [switch]$NoPause,
+    # GitHub 發行：自動更新來源的公開 repo（owner/repo）。和 -HubUrl 只能擇一。
+    [string]$GitHubRepo,
+    # GitHub 發行：這一版 Release 的下載位置，例如 https://github.com/<owner>/<repo>/releases/download/<tag>。
+    [string]$DownloadBase
 )
 
 # native 指令（cargo / tauri / npm）會把進度寫到 stderr。PowerShell 5.1 下 'Stop' 會把它當成
@@ -151,6 +158,7 @@ function Invoke-Pause {
 $savedHub = $env:TM_HUB_URL
 $savedSecret = $env:TM_CLIENT_SECRET
 $savedSigningKey = $env:TAURI_SIGNING_PRIVATE_KEY
+$savedGitHubRepo = $env:TM_UPDATE_GITHUB_REPO
 $overlayPath = Join-Path $PSScriptRoot "tmp\updater.conf.json"
 $exitCode = 0
 try {
@@ -180,6 +188,13 @@ try {
     Write-Host "MSVC C++ Build Tools：已安裝" -ForegroundColor Green
 
     # --- 2. hub 位置與 secret ---
+    $github = $false
+    if ($GitHubRepo) {
+        $GitHubRepo = $GitHubRepo.Trim()
+        if ($HubUrl) { throw "-GitHubRepo 與 -HubUrl 只能擇一：GitHub 發行的安裝檔不帶 hub。" }
+        if ($GitHubRepo -notmatch '^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$') { throw "-GitHubRepo 要寫成 owner/repo：$GitHubRepo" }
+        $github = $true
+    }
     $corp = $false
     $secret = $null
     if ($HubUrl) {
@@ -201,6 +216,8 @@ try {
         if ($secret -match '[\r\n"]') { throw "client secret 不可含換行或引號。" }
         $corp = $true
         Write-Host "公司版：hub = $HubUrl，secret = ••••$($secret.Substring($secret.Length - 4))" -ForegroundColor Green
+    } elseif ($GitHubRepo) {
+        Write-Host "GitHub 發行：不帶 hub 與金鑰（使用者在設定裡自己填），從 $GitHubRepo 的 Release 更新。" -ForegroundColor Green
     } else {
         Write-Host "未指定 -HubUrl：產出本機模式安裝檔（不上傳，檔名帶 -local；不要發給員工）。" -ForegroundColor Yellow
     }
@@ -209,7 +226,7 @@ try {
     $updater = $false
     $signingKey = $null
     $pubkey = $null
-    if ($corp -and -not $NoUpdater) {
+    if (($corp -or $github) -and -not $NoUpdater) {
         if ($SigningKeyFile) {
             if (-not (Test-Path $SigningKeyFile)) { throw "找不到 -SigningKeyFile：$SigningKeyFile" }
             $keyPath = (Resolve-Path $SigningKeyFile).Path
@@ -222,14 +239,19 @@ try {
             $pubkey = "$env:TM_UPDATER_PUBKEY".Trim()
         }
         if (-not $signingKey -or -not $pubkey) {
-            throw "公司版需要自動更新的簽章金鑰：用 -SigningKeyFile，或設定環境變數 TAURI_SIGNING_PRIVATE_KEY 與 TM_UPDATER_PUBKEY。確定這一版不要自動更新時加 -NoUpdater。"
+            throw "公司版與 GitHub 發行需要自動更新的簽章金鑰：用 -SigningKeyFile，或設定環境變數 TAURI_SIGNING_PRIVATE_KEY 與 TM_UPDATER_PUBKEY。確定這一版不要自動更新時加 -NoUpdater。"
         }
         $updater = $true
-        Write-Host "自動更新：開啟（feed = $HubUrl/updates/latest.json）" -ForegroundColor Green
-    } elseif ($corp) {
+        if ($github) {
+            if (-not $DownloadBase) { throw "GitHub 發行要給 -DownloadBase（這一版 Release 的下載位置），latest.json 的安裝檔網址由它組成。" }
+            Write-Host "自動更新：開啟（feed = https://github.com/$GitHubRepo/releases/latest/download/latest.json）" -ForegroundColor Green
+        } else {
+            Write-Host "自動更新：開啟（feed = $HubUrl/updates/latest.json）" -ForegroundColor Green
+        }
+    } elseif ($corp -or $github) {
         Write-Host "自動更新：關閉（-NoUpdater）。之後的每一版都要在每台電腦手動重裝。" -ForegroundColor Yellow
     }
-    if ($ReleasesDir -and -not $updater) {
+    if ($ReleasesDir -and -not ($updater -and $corp)) {
         throw "-ReleasesDir 只給有自動更新的公司版：hub 靠 latest.json 決定核准版本與下載連結。"
     }
     if ($NotesFile -and -not (Test-Path $NotesFile)) { throw "找不到 -NotesFile：$NotesFile" }
@@ -278,13 +300,14 @@ try {
         $env:TM_HUB_URL = $HubUrl
         $env:TM_CLIENT_SECRET = $secret
     }
+    if ($github) { $env:TM_UPDATE_GITHUB_REPO = $GitHubRepo } else { Remove-Item Env:TM_UPDATE_GITHUB_REPO -ErrorAction SilentlyContinue }
     # --ci：不要互動提示。沒有 TAURI_SIGNING_PRIVATE_KEY_PASSWORD 時 tauri build 會停下來問私鑰密碼，
     # 而 PowerShell 5.1 無法把環境變數設成空字串；--ci 模式下未設密碼即視為空密碼（無密碼的金鑰）。
     $buildArgs = @("run", "tauri", "build", "--", "--bundles", "nsis", "--ci")
     if ($updater) {
         # 公鑰與 createUpdaterArtifacts 只在這次建置生效（--config 以 JSON merge patch 疊在 tauri.conf.json 上）。
         $updaterConf = [ordered]@{ pubkey = $pubkey }
-        if ($HubUrl.StartsWith("http://")) {
+        if ($HubUrl -and $HubUrl.StartsWith("http://")) {
             # 只有 -AllowHttp 的測試 hub 才會走到這裡；updater 預設拒絕 http 的 feed。
             $updaterConf.dangerousInsecureTransportProtocol = $true
         }
@@ -304,6 +327,7 @@ try {
     Remove-Item Env:TM_HUB_URL -ErrorAction SilentlyContinue
     Remove-Item Env:TM_CLIENT_SECRET -ErrorAction SilentlyContinue
     Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
+    Remove-Item Env:TM_UPDATE_GITHUB_REPO -ErrorAction SilentlyContinue
 
     # --- 7. 收整 ---
     Write-Step "收整安裝檔"
@@ -313,7 +337,8 @@ try {
     $releaseDir = Join-Path $PSScriptRoot "release\v$version"
     New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
     # 檔名不含空白：URL 與 IT 的靜默安裝指令（/S）比較好寫。
-    $name = if ($corp) { "TokenMonitor_${version}_x64-setup.exe" } else { "TokenMonitor_${version}_x64-local-setup.exe" }
+    # GitHub 發行和 Electron 版放在同一個 Release，檔名標出 Rust 版。
+    $name = if ($corp) { "TokenMonitor_${version}_x64-setup.exe" } elseif ($github) { "Token-Monitor-Rust_${version}_x64-setup.exe" } else { "TokenMonitor_${version}_x64-local-setup.exe" }
     $dest = Join-Path $releaseDir $name
     Copy-Item -Path $built.FullName -Destination $dest -Force
     $hash = (Get-FileHash -Algorithm SHA256 $dest).Hash.ToLowerInvariant()
@@ -325,7 +350,8 @@ try {
         if (-not (Test-Path $sig)) { throw "找不到 updater 簽章 $sig（createUpdaterArtifacts 沒有生效？）" }
         Copy-Item -Path $sig -Destination "$dest.sig" -Force
         $feed = Join-Path $releaseDir "latest.json"
-        $feedArgs = @("scripts/make-latest-json.mjs", "--version", $version, "--installer", $dest, "--hub-url", $HubUrl, "--out", $feed)
+        $source = if ($github) { @("--download-base", $DownloadBase) } else { @("--hub-url", $HubUrl) }
+        $feedArgs = @("scripts/make-latest-json.mjs", "--version", $version, "--installer", $dest) + $source + @("--out", $feed)
         if ($NotesFile) { $feedArgs += @("--notes-file", (Resolve-Path $NotesFile).Path) }
         & node @feedArgs
         Assert-LastExit "make-latest-json"
@@ -346,7 +372,7 @@ try {
     Write-Host "  檔案   $dest" -ForegroundColor Green
     Write-Host "  大小   $sizeMb MB"
     Write-Host "  SHA256 $hash"
-    Write-Host "  版本   $version（$(if ($corp) { "公司版，hub = $HubUrl" } else { '本機模式' })）"
+    Write-Host "  版本   $version（$(if ($corp) { "公司版，hub = $HubUrl" } elseif ($github) { "GitHub 發行，更新來源 = $GitHubRepo" } else { '本機模式' })）"
     Write-Host ""
     Write-Host "注意：" -ForegroundColor Yellow
     Write-Host "  - 安裝檔沒有程式碼簽章，第一次執行會出現 SmartScreen 警告（其他資訊 → 仍要執行）。"
@@ -366,6 +392,7 @@ finally {
     if ($null -ne $savedHub) { $env:TM_HUB_URL = $savedHub } else { Remove-Item Env:TM_HUB_URL -ErrorAction SilentlyContinue }
     if ($null -ne $savedSecret) { $env:TM_CLIENT_SECRET = $savedSecret } else { Remove-Item Env:TM_CLIENT_SECRET -ErrorAction SilentlyContinue }
     if ($null -ne $savedSigningKey) { $env:TAURI_SIGNING_PRIVATE_KEY = $savedSigningKey } else { Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue }
+    if ($null -ne $savedGitHubRepo) { $env:TM_UPDATE_GITHUB_REPO = $savedGitHubRepo } else { Remove-Item Env:TM_UPDATE_GITHUB_REPO -ErrorAction SilentlyContinue }
     Remove-Item $overlayPath -ErrorAction SilentlyContinue
     Invoke-Pause
 }

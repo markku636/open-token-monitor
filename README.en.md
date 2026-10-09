@@ -12,6 +12,34 @@ Upstream Token Monitor is a desktop widget with an optional hub. This repository
 
 The docs are in Traditional Chinese.
 
+## How it differs from upstream
+
+**Hub**
+
+| | This repository | Upstream |
+|---|---|---|
+| Storage | PostgreSQL (a JSON file in development), daily backups, history purging | A JSON file (`data/devices.json`) |
+| Permissions | Admin, client and API token; client keys can only upload and read, and there can be several | One shared key |
+| Web pages | Usage dashboard, account ranking, devices and limits, admin page, install guide (`/install`) | None, only the API |
+| Organisation | Filter and compare by company and department; the roster is edited on the web page or imported from Excel, and devices are assigned to employees by email | None |
+| Reports | A reporting API for other systems | None |
+| Upload checks | Checks every upload's shape and size and answers 400 with the reason | Basic checks |
+
+**Clients**
+
+| | Electron company build | Rust edition | Upstream |
+|---|---|---|---|
+| Platforms | Windows, macOS (Apple silicon), Linux | Windows | Windows, macOS, Linux |
+| Connecting to a hub | A company build has the hub and key preset; a GitHub installer is set up under "Multi-device Sync" | A company build has the hub and key built in; a GitHub installer is set up under "Company hub" in Settings, with the key kept in Windows Credential Manager | Local mode by default; set up by hand |
+| Usage the widget shows | This computer only | This computer, plus a company tab | All devices combined when connected to a hub |
+| Upload interval | Every 30 minutes | Every 10 minutes by default; real time, 10, 20 or 30 minutes | Real time |
+| Launch at login | On by default, minimised to the taskbar | On by default | Off |
+| Updates | The company's GitLab Release or this repository's GitHub Release | The company hub or this repository's GitHub Release | Upstream's GitHub Release |
+| Headless uploader | None | `tm-agent` | Upstream's headless agent |
+| Installer signing | No code signature (ad-hoc only on macOS) | No code signature; updates are signature-checked | Signed |
+
+The full list of setting differences is in [docs/client-build.zh-TW.md](docs/client-build.zh-TW.md) and [tauri/README.md](tauri/README.md).
+
 ## Screenshots
 
 The hub's dashboard, org roster and install guide, with made-up data from `npm run smoke:hub`.

@@ -3,6 +3,8 @@ fn main() {
     // 由 build-installer.ps1 以環境變數傳入；值改變時必須重編，否則會打包到舊值。
     println!("cargo:rerun-if-env-changed=TM_HUB_URL");
     println!("cargo:rerun-if-env-changed=TM_CLIENT_SECRET");
+    // GitHub 發行的安裝檔從這個 repo（owner/repo）最新的 Release 更新（build-installer.ps1 -GitHubRepo）。
+    println!("cargo:rerun-if-env-changed=TM_UPDATE_GITHUB_REPO");
     let channel = match std::env::var("TM_CLIENT_SECRET") {
         Ok(v) if !v.trim().is_empty() => "corp",
         _ => "dev",

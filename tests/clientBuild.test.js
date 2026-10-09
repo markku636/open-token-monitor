@@ -1080,8 +1080,19 @@ test('the GitHub Release builds installers without a hub, from client-v tags onl
   // A run by hand builds X.Y.Z-corp.0 and creates no Release.
   assert.ok(workflow.includes("      TM_CLIENT_VERSION: ${{ startsWith(github.ref, 'refs/tags/client-v') && github.ref_name || '' }}\n"));
   assert.match(workflow, /^ {2}release:\n(?: {4}.*\n)*? {4}if: startsWith\(github\.ref, 'refs\/tags\/client-v'\)\n/m);
-  // Nothing that could put a key or the hub into a public installer.
-  assert.doesNotMatch(workflow, /TM_CLIENT_SECRET|TM_CLIENT_HUB_URL|TOKEN_MONITOR_SECRET|secrets\.|set -x/);
+  // Nothing that could put a key or the hub into a public installer. The one
+  // secret is the Rust client's updater signing key, which signs the installer
+  // and is not put into it.
+  const signing = /\$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY(?:_PASSWORD)? \}\}/g;
+  assert.doesNotMatch(workflow.replace(signing, ''), /TM_CLIENT_SECRET|TM_CLIENT_HUB_URL|TOKEN_MONITOR_SECRET|TM_HUB_URL|secrets\.|set -x/);
+  // The Rust client is built without a hub and updates from this repository.
+  assert.match(workflow, /^ {2}build-rust:\n[\s\S]*?^ {4}needs: verify$/m);
+  assert.ok(workflow.includes('.\\build-installer.ps1 -GitHubRepo $env:REPO -DownloadBase $env:DOWNLOADS'));
+  assert.ok(workflow.includes('    needs: [build, build-rust]\n'));
+  for (const file of ['Token-Monitor-Rust_*_x64-setup.exe', 'Token-Monitor-Rust_*_x64-setup.exe.sig', 'latest.json']) {
+    assert.ok(workflow.includes(`            tauri/release/v*/${file}\n`), `the Rust build keeps ${file}`);
+  }
+  assert.ok(notes.includes('[Token-Monitor-Rust_@RUSTVERSION@_x64-setup.exe](@DOWNLOADS@/Token-Monitor-Rust_@RUSTVERSION@_x64-setup.exe)'));
   assert.match(workflow, /^ {2}build:\n[\s\S]*?^ {4}needs: verify$/m, 'the builds wait for verify');
   assert.ok(workflow.includes('      - run: npm run verify\n'));
   assert.match(workflow, /^ {4}permissions:\n {6}contents: write$/m);
@@ -1099,7 +1110,7 @@ test('the GitHub Release builds installers without a hub, from client-v tags onl
   }
   // Every placeholder in the notes is one the workflow fills in.
   const filled = [...workflow.matchAll(/-e "s\|@([A-Z]+)@\|/g)].map((match) => match[1]);
-  assert.deepEqual(filled, ['VERSION', 'DOWNLOADS']);
+  assert.deepEqual(filled, ['VERSION', 'RUSTVERSION', 'DOWNLOADS']);
   assert.deepEqual([...new Set([...notes.matchAll(/@([A-Z]+)@/g)].map((match) => match[1]))].sort(), [...filled].sort());
   assert.ok(workflow.includes(`if grep -n '@[A-Z][A-Z]*@' release-notes.md; then`));
   // The apps read /releases/latest/download/: the Release has to be the latest.

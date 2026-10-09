@@ -1,7 +1,7 @@
 {
   "name": "token-monitor-tauri",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Token Monitor 團隊版用戶端（Tauri 2 + Rust）",
   "type": "module",
   "scripts": {

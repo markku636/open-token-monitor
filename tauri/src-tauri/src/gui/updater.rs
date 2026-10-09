@@ -61,19 +61,26 @@ fn feed_url(app: &AppHandle) -> Result<url::Url, update::DisabledReason> {
         cfg!(debug_assertions),
         &configured_pubkey(app),
         hub.url.as_deref(),
+        crate::baked::github_update_repo(),
     )
 }
 
 /// 用系統瀏覽器開生效 hub 上的版本頁（`update::release_page_url`）。網址只由這裡組出，前端不能指定，與 `service_status_open` 相同。
 pub fn open_release_page(app: &AppHandle) -> AppResult<()> {
-    let settings = app.state::<AppState>().settings();
-    let hub = crate::settings::resolve_hub(&settings, None, None);
-    let Some(hub_url) = hub.url.as_deref() else {
-        return Err(AppError::HubNotConfigured);
+    let url = if let Some(repo) = crate::baked::github_update_repo() {
+        // GitHub 發行：版本頁是 repo 最新的 Release。
+        update::github_release_page_url(repo)
+            .ok_or_else(|| AppError::InvalidArgument("GitHub repo 無效，無法開啟版本頁".into()))?
+    } else {
+        let settings = app.state::<AppState>().settings();
+        let hub = crate::settings::resolve_hub(&settings, None, None);
+        let Some(hub_url) = hub.url.as_deref() else {
+            return Err(AppError::HubNotConfigured);
+        };
+        let state = current_state(app);
+        update::release_page_url(Some(hub_url), state.version())
+            .ok_or_else(|| AppError::InvalidArgument("hub 位置無效，無法開啟版本頁".into()))?
     };
-    let state = current_state(app);
-    let url = update::release_page_url(Some(hub_url), state.version())
-        .ok_or_else(|| AppError::InvalidArgument("hub 位置無效，無法開啟版本頁".into()))?;
     tracing::info!(%url, "opening release page");
     app.opener()
         .open_url(url.as_str(), None::<&str>)

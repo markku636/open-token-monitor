@@ -5,9 +5,12 @@ name: Client release
 # (docs/client-build.zh-TW.md, "從 GitHub 發行"). The repository is public, so
 # the installers carry no hub URL and no client key (TM_CLIENT_NO_HUB=1): the
 # user enters both in Settings. Installed apps update from this repository's
-# latest Release (TM_CLIENT_UPDATE_GITHUB_REPO). Run by hand (Actions → Client
-# release → Run workflow), it builds an X.Y.Z-corp.0 trial of each platform as
-# artifacts and creates no Release.
+# latest Release (TM_CLIENT_UPDATE_GITHUB_REPO). The same Release carries the
+# Rust (Tauri) client for Windows, Token-Monitor-Rust_<tauri version>_x64-setup.exe,
+# also without a hub; it updates from the latest.json in the latest Release,
+# signed with the TAURI_SIGNING_PRIVATE_KEY secret (tauri/build-installer.ps1
+# -GitHubRepo). Run by hand (Actions → Client release → Run workflow), it builds
+# an X.Y.Z-corp.0 trial of each platform as artifacts and creates no Release.
 
 on:
   push:
@@ -79,9 +82,48 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # The Rust client: its own version (tauri/src-tauri/tauri.conf.json), Windows
+  # only. Only the updater's signing key comes from a secret; it signs the
+  # installer and is not put into it.
+  build-rust:
+    name: build (rust, win)
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tauri/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tauri/src-tauri
+      - name: Build the installer
+        shell: powershell
+        working-directory: tauri
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TM_UPDATER_PUBKEY: ${{ vars.TM_UPDATER_PUBKEY }}
+          REPO: ${{ github.repository }}
+          DOWNLOADS: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        run: .\build-installer.ps1 -GitHubRepo $env:REPO -DownloadBase $env:DOWNLOADS -SkipVerify -NoPause
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-rust
+          # The installer, its updater signature and latest.json.
+          path: |
+            tauri/release/v*/Token-Monitor-Rust_*_x64-setup.exe
+            tauri/release/v*/Token-Monitor-Rust_*_x64-setup.exe.sig
+            tauri/release/v*/latest.json
+          if-no-files-found: error
+          retention-days: 30
+
   release:
     name: release
-    needs: build
+    needs: [build, build-rust]
     if: startsWith(github.ref, 'refs/tags/client-v')
     runs-on: ubuntu-latest
     permissions:
@@ -113,12 +155,18 @@ jobs:
           check_update_info latest.yml "Token-Monitor_${CLIENT_VERSION}_x64-setup.exe"
           check_update_info latest-mac.yml "Token-Monitor_${CLIENT_VERSION}_aarch64.zip" "  - url"
           check_update_info latest-linux.yml "Token-Monitor_${CLIENT_VERSION}_amd64.AppImage"
+          # The Rust client's latest.json names its installer in this Release.
+          RUST_EXE="$(cd dist/client && ls Token-Monitor-Rust_*_x64-setup.exe)"
+          grep -q "\"url\": \"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/${RUST_EXE}\"" dist/client/latest.json \
+            || { echo "dist/client/latest.json does not name ${RUST_EXE}"; exit 1; }
       # The Release's text: which file for which computer, how to connect it to
       # a hub (packaging/client-release-notes.github.md), then the checksums.
       - name: Write the Release notes
         run: |
           CLIENT_VERSION="${TAG#client-v}"
+          RUST_VERSION="$(sed -n 's/^  "version": "\(.*\)",$/\1/p' dist/client/latest.json)"
           sed -e "s|@VERSION@|${CLIENT_VERSION}|g" \
+            -e "s|@RUSTVERSION@|${RUST_VERSION}|g" \
             -e "s|@DOWNLOADS@|${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}|g" \
             packaging/client-release-notes.github.md > release-notes.md
           if grep -n '@[A-Z][A-Z]*@' release-notes.md; then echo "release-notes.md has a placeholder left"; exit 1; fi

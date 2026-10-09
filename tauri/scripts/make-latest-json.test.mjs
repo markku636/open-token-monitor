@@ -58,3 +58,15 @@ test("the CLI reads the .sig next to the installer and self-checks", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("GitHub 發行：安裝檔網址是 Release 的下載位置", () => {
+  const base = "https://github.com/o/r/releases/download/client-v0.63.1-corp.2/";
+  const feed = buildLatestJson({ version: "0.2.0", installerName: "Token-Monitor-Rust_0.2.0_x64-setup.exe", signature: "s", downloadBase: base });
+  for (const key of PLATFORM_KEYS) {
+    assert.equal(feed.platforms[key].url, "https://github.com/o/r/releases/download/client-v0.63.1-corp.2/Token-Monitor-Rust_0.2.0_x64-setup.exe");
+  }
+  const ok = { version: "0.2.0", installerName: "a.exe", signature: "s" };
+  assert.throws(() => buildLatestJson(ok), /只能一個/);
+  assert.throws(() => buildLatestJson({ ...ok, hubUrl: "https://h", downloadBase: base }), /只能一個/);
+  assert.throws(() => buildLatestJson({ ...ok, downloadBase: "http://github.com/o/r" }), /https/);
+});

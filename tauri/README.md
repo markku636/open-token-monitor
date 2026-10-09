@@ -68,6 +68,8 @@ powershell -ExecutionPolicy Bypass -File .\build-installer.ps1 -HubUrl https://<
 
 產出放在 `release\v<版本>\`：安裝檔、updater 簽章 `.sig` 與 `latest.json`。安裝好的電腦每小時向 hub 檢查一次新版，下載並驗章後等使用者按「重新啟動以更新」。金鑰的產生與保管、發佈順序與檢查見 [docs/release.md](docs/release.md)。安裝檔目前沒有程式碼簽章（第一次執行會有 SmartScreen 警告）。
 
+**GitHub 發行**：推 `client-v*` tag 時，[client-release.yml](../.github/workflows/client-release.yml) 會用 `-GitHubRepo <owner>/<repo> -DownloadBase <Release 下載位置>` 打包 `Token-Monitor-Rust_<版本>_x64-setup.exe`，和 Electron 版放在同一個 Release。這種安裝檔不帶 hub 與金鑰，使用者在設定的「公司 hub」自己填；它從 repo 最新 Release 的 `latest.json` 自動更新。repo 要先設定 secret `TAURI_SIGNING_PRIVATE_KEY`（沒有密碼時 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 留空）與 variable `TM_UPDATER_PUBKEY`。Rust 版的版號和 tag 無關，有改 Rust 版時先改 `tauri.conf.json` 的版本（`-SetVersion`），否則已安裝的電腦不會更新。
+
 ## 驗證
 
 ```powershell

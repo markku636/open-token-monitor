@@ -16,6 +16,7 @@ pub const BUILD_CHANNEL: &str = env!("TM_BUILD_CHANNEL");
 
 const HUB_URL: Option<&str> = option_env!("TM_HUB_URL");
 const CLIENT_SECRET: Option<&str> = option_env!("TM_CLIENT_SECRET");
+const UPDATE_GITHUB_REPO: Option<&str> = option_env!("TM_UPDATE_GITHUB_REPO");
 
 /// 內建的 hub 網址（去掉尾端斜線）；未內建時為 `None`。
 pub fn hub_url() -> Option<&'static str> {
@@ -27,6 +28,14 @@ pub fn hub_url() -> Option<&'static str> {
 /// 內建的 client secret；未內建時為 `None`。
 pub fn client_secret() -> Option<&'static str> {
     CLIENT_SECRET.map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// GitHub 發行的安裝檔（不帶 hub 與 secret）的更新來源：公開 repo 的 `owner/repo`。
+/// 格式不對時視為沒有（build-installer.ps1 已先檢查）。
+pub fn github_update_repo() -> Option<&'static str> {
+    UPDATE_GITHUB_REPO
+        .map(str::trim)
+        .filter(|s| crate::update::is_github_repo(s))
 }
 
 pub fn is_corp_build() -> bool {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0 — GitHub 發行
+
+- GitHub 發行：`client-v*` tag 會同時打包 Rust 版 `Token-Monitor-Rust_<版本>_x64-setup.exe`，和 Electron 版放在同一個 Release。安裝檔不帶 hub 與金鑰，從該 repo 最新 Release 的 `latest.json` 自動更新（新的編譯時常數 `TM_UPDATE_GITHUB_REPO`，`build-installer.ps1 -GitHubRepo/-DownloadBase`，`make-latest-json.mjs --download-base`）；「查看完整版本資訊」開 GitHub 的最新 Release。
+- 設定頁「公司 hub」：沒有內建 hub 的安裝檔（GitHub 發行、本機模式）直接顯示位置與金鑰的輸入欄，不必先點「覆寫位置或金鑰」；按鈕改成「清除」。
+
 ## 未發佈 — M3
 
 - 最低 Rust 版本改成 1.88（`Cargo.toml` 的 `rust-version` 與 CI）：鎖定的相依（darling 0.24、image 0.25.10、time 0.3.55 等）需要 1.88，CI 原本釘在 1.85 而編不過。

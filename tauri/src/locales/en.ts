@@ -208,6 +208,10 @@ export const EN: Record<string, string> = {
   "套用": "Apply",
   "已套用，重新連線中": "Applied; reconnecting",
   "還原內建值": "Restore built-in values",
+  "填入公司 hub 的位置與 client 金鑰（向 IT 索取），這台的用量就會上傳到 hub。":
+    "Enter your company hub's address and client key (ask IT) to upload this PC's usage to the hub.",
+  "client 金鑰": "Client key",
+  "金鑰存在 Windows 認證管理員，不寫入設定檔。": "The key is kept in Windows Credential Manager, not in the settings file.",
   "已還原內建值": "Built-in values restored",
   "金鑰存在 Windows 認證管理員，不寫入設定檔。只有 hub 更換金鑰、而這台還沒裝新版時才需要。":
     "The key is kept in Windows Credential Manager, never in the settings file. Only needed when the hub rotates its key before this PC gets a new build.",

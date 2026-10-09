@@ -15,6 +15,34 @@
 - **Electron 用戶端打包**（`client/`、`packaging/`）：上游的桌面 app，打包時預填你的 hub 網址與 client 金鑰。第一次開啟就會連上 hub、每 30 分鐘上傳一次，並設定開機自動啟動。
 - **Rust/Tauri 用戶端**（`tauri/`）：用 Rust 寫的輕量用戶端。它上傳的內容和上游用戶端逐欄相同，另外提供不需要畫面的 `tm-agent`。
 
+## 和上游版的差異
+
+**hub**
+
+| 項目 | 本 repo | 上游 |
+|---|---|---|
+| 資料儲存 | PostgreSQL（開發時可用 JSON 檔），每日備份、可刪除歷史資料 | JSON 檔（`data/devices.json`） |
+| 權限 | 管理員、client、API token 三種；client 金鑰只能上傳與讀取，可以有多把 | 一把共用金鑰 |
+| 網頁 | 用量 dashboard、帳號排行、裝置與額度、管理頁、安裝說明（`/install`） | 沒有網頁，只有 API |
+| 組織 | 依公司、部門篩選與比較；名單在網頁上編輯或用 Excel 匯入，依 email 把裝置歸給員工 | 沒有 |
+| 報表 | 報表 API，給其他系統讀 | 沒有 |
+| 上傳檢查 | 檢查每筆上傳的格式與大小，不合格的回 400 並說明原因 | 基本檢查 |
+
+**用戶端**
+
+| 項目 | Electron 公司版 | Rust 版 | 上游 |
+|---|---|---|---|
+| 平台 | Windows、macOS（Apple 晶片）、Linux | Windows | Windows、macOS、Linux |
+| 連上 hub | 公司打包預填 hub 與金鑰；GitHub 安裝檔在「多裝置同步」自己填 | 公司打包內建 hub 與金鑰；GitHub 安裝檔在設定的「公司 hub」自己填，金鑰存在 Windows 認證管理員 | 預設本機模式，自己設定 |
+| widget 顯示的用量 | 只有這台電腦 | 這台電腦，另有全公司分頁 | 連上 hub 時是全部裝置的加總 |
+| 上傳頻率 | 每 30 分鐘 | 預設每 10 分鐘，可選即時、10、20、30 分鐘 | 即時 |
+| 開機自動啟動 | 預設開啟，開機時縮到工作列 | 預設開啟 | 關閉 |
+| 自動更新 | 公司 GitLab Release，或本 repo 的 GitHub Release | 公司 hub，或本 repo 的 GitHub Release | 上游的 GitHub Release |
+| 不需要畫面的上傳程式 | 沒有 | `tm-agent` | 上游的 headless agent |
+| 安裝檔簽章 | 沒有程式碼簽章（macOS 只有 ad-hoc） | 沒有程式碼簽章；更新檔有簽章驗證 | 有簽章 |
+
+詳細的設定差異見 [docs/client-build.zh-TW.md](docs/client-build.zh-TW.md) 與 [tauri/README.md](tauri/README.md)。
+
 ## 畫面
 
 hub 的用量 dashboard、組織名單與安裝說明。資料是 `npm run smoke:hub` 產生的假資料。
