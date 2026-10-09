@@ -208,7 +208,7 @@ pub fn decode_blob(bytes: &[u8]) -> String {
     let looks_json =
         |s: &str| s.starts_with('{') || s.starts_with('[') || s.contains("\"accessToken\"");
     let utf8 = trim(String::from_utf8_lossy(bytes).into_owned());
-    let utf16 = if bytes.len() % 2 == 0 {
+    let utf16 = if bytes.len().is_multiple_of(2) {
         let units: Vec<u16> = bytes
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
