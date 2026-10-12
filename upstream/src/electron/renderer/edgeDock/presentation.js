@@ -76,9 +76,16 @@
       : null;
   }
 
-  function accountSummary(provider) {
+  function accountSummary(provider, options = {}) {
+    const windowKey = options.windowKey || '';
     const selection = trayText.compactLimitSelection(provider);
-    const headline = headlinePick(selection);
+    const chosenWindow = windowKey && provider?.status === 'ok' && !provider?.stale
+      ? dockItems.selectedLimitWindow(provider, windowKey, options)
+      : null;
+    const headline = windowKey
+      ? (chosenWindow && trayText.remainingPercent(chosenWindow, provider) !== null
+        ? { window: chosenWindow, remaining: trayText.remainingPercent(chosenWindow, provider) } : null)
+      : headlinePick(selection);
     return {
       status: provider?.status === 'ok' && !provider?.stale ? 'ok' : (provider?.stale ? 'stale' : 'error'),
       planLabel: String(provider?.planLabel || provider?.accountLabel || ''),
@@ -89,10 +96,9 @@
       stale: provider?.stale === true,
       headlineRemaining: headline ? headline.remaining : null,
       headlineWindow: headline ? headline.window : null,
-      // Severity is the tightest metered pool, not the headline: with the
-      // warn-colours toggle on, an account whose weekly runs out while its
-      // session still reads 100% flags before the number flips to 0%.
-      severityPercent: selection ? selection.tightestPercent : null,
+      // Automatic mode warns for the tightest metered pool. A pinned window
+      // keeps both the number and its colour tied to that chosen pool.
+      severityPercent: windowKey ? (headline?.remaining ?? null) : (selection ? selection.tightestPercent : null),
       // The card renders its quota rows from the shared Limits view, which
       // reads the collector record itself. Projecting the windows here is what
       // made the card a second, less-informed implementation of the same rows:
@@ -189,7 +195,8 @@
         models: session.models || {},
         totalTokens: finite(session.totalTokens) || 0,
         costUsd: finite(session.costUsd) || 0,
-        lastUsedAt: session.lastUsedAt || session.startedAt || null,
+        lastUsedAt: session.lastUsedAt || null,
+        startedAt: session.startedAt || null,
         // Carried onto the projected row, not just used here: the dock renderer
         // re-derives the state at paint time and needs the boundary to do it.
         turnEnded: session.turnEnded === true,
@@ -241,6 +248,17 @@
       ordered = entries.filter((entry) => chosen.has(entry.key));
     }
     return { rows: sessionRowsFor(ordered, stateByKey), running, stateByKey };
+  }
+
+  function recentSessionRows(stats, cap = SESSIONS_RECENT_COUNT, options = {}) {
+    const entries = sessionSourceRows(stats);
+    if (options.includeRunningBeyondCap === true) {
+      const states = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
+      const selected = entries.filter((entry, index) => index < cap || states.get(entry.key) === 'running');
+      return sessionRowsFor(selected, states);
+    }
+    const runningOnly = options.runningOnly === true;
+    return cappedSessionRows(entries, runningOnly ? entries.length : cap, runningOnly, 'timeline').rows;
   }
 
   // The running reading, derived from the projected rows at the clock the caller
@@ -314,7 +332,7 @@
     const hidden = new Set(options.hiddenAccounts || []);
     const accounts = records
       .filter((record) => !record?.accountKey || !hidden.has(record.accountKey))
-      .map((record) => ({ record, summary: accountSummary(record) }));
+      .map((record) => ({ record, summary: accountSummary(record, options) }));
     // Accounts keep the collector's order, as the Limits view lists them. The
     // live Codex account is taken from this device's records alone, so a synced
     // device's login is never marked as the one in use here.
@@ -477,21 +495,12 @@
     if (metric === dockItems.SESSIONS_METRIC) {
       // Every tracked client, not just the ones with a limits provider: this is
       // the item that answers for the clients no quota card can show.
-      const rows = sessionSourceRows(stats);
+      const sessions = recentSessionRows(stats, SESSIONS_RECENT_COUNT, { runningOnly: options.runningOnly === true });
       // Only a cell that draws the rate carries one: attaching the sample to every
       // sessions item would put live figures in a projection nothing reads them
       // from, and would make "this cell shows marks" indistinguishable in the cell.
       const wantsRate = options.cellDetail === 'rate';
       const sample = wantsRate ? options.liveRate || null : null;
-      const stateByKey = new Map(rows.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
-      const runningEntries = rows.filter(({ key }) => stateByKey.get(key) === 'running');
-      const { rows: sessions } = cappedSessionRows(
-        rows,
-        options.runningOnly === true ? runningEntries.length : SESSIONS_RECENT_COUNT,
-        options.runningOnly === true,
-        // A timeline prints newest-first; the provider card keeps running-first.
-        'timeline'
-      );
       // No frozen count: the cell carries its rows and the renderer asks them at
       // paint time, so a rail left on screen stops claiming a running session the
       // moment that session crosses the window. `expiresAt` lets the main process
@@ -602,6 +611,7 @@
         // every time an account refreshes or signs out.
         cells.push(providerCell(item.provider, byId.get(item.provider) || [], {
           ...item,
+          showCodexAdditionalLimits: options.showCodexAdditionalLimits,
           subscriptionAccounts: allById.get(item.provider) || [],
           stats,
           localDeviceId: options.localDeviceId,
@@ -652,6 +662,7 @@
     SESSIONS_METRIC: dockItems.SESSIONS_METRIC,
     buildEdgeDockCells,
     nextRunningExpiryAt,
+    recentSessionRows,
     runningSessionSummary,
     connectedLimitProviders,
     displayPercent,

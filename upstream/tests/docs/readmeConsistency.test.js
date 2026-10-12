@@ -56,7 +56,7 @@ const supportedToolOrder = [
   'OpenCode',
   'Hermes Agent',
   'OpenClaw',
-  'Cursor IDE / Cursor CLI',
+  'Cursor IDE / Cursor CLI / Grok Bot',
   'Antigravity',
   'Cline',
   'Amp',
@@ -71,6 +71,7 @@ const supportedToolOrder = [
   'Kilo',
   'Command Code',
   'MiMo Code / MiMo Desktop',
+  'Muse Code',
   'ZCode / GLM',
   'Kiro',
   'CodeBuddy',
@@ -90,6 +91,7 @@ const supportedToolOrder = [
   'Ollama',
   'Trae CN',
   'Alibaba Cloud',
+  'StepFun',
   'Third-party APIs'
 ];
 
@@ -114,6 +116,7 @@ const supportedToolIdOrder = [
   'kilo',
   'commandcode',
   'mimo',
+  'muse',
   'zcode',
   'kiro',
   'codebuddy',
@@ -133,6 +136,7 @@ const supportedToolIdOrder = [
   'ollama',
   'trae',
   'alibaba',
+  'stepfun',
   'thirdparty'
 ];
 
