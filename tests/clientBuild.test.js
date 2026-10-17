@@ -1090,7 +1090,8 @@ test('the GitHub Release builds installers without a hub, from client-v tags onl
   assert.ok(workflow.includes('.\\build-installer.ps1 -GitHubRepo $env:REPO -DownloadBase $env:DOWNLOADS'));
   assert.ok(workflow.includes('    needs: [build, build-rust]\n'));
   for (const file of ['Token-Monitor-Rust_*_x64-setup.exe', 'Token-Monitor-Rust_*_x64-setup.exe.sig', 'latest.json']) {
-    assert.ok(workflow.includes(`            tauri/release/v*/${file}\n`), `the Rust build keeps ${file}`);
+    // One folder, so the files sit at the top of the artifact (dist/client/ of the release job).
+    assert.ok(workflow.includes(`            tauri/release/github/${file}\n`), `the Rust build keeps ${file}`);
   }
   assert.ok(notes.includes('[Token-Monitor-Rust_@RUSTVERSION@_x64-setup.exe](@DOWNLOADS@/Token-Monitor-Rust_@RUSTVERSION@_x64-setup.exe)'));
   assert.match(workflow, /^ {2}build:\n[\s\S]*?^ {4}needs: verify$/m, 'the builds wait for verify');

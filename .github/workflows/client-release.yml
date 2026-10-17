@@ -110,14 +110,23 @@ jobs:
           REPO: ${{ github.repository }}
           DOWNLOADS: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
         run: .\build-installer.ps1 -GitHubRepo $env:REPO -DownloadBase $env:DOWNLOADS -SkipVerify -NoPause
+      # upload-artifact keeps the folders under the paths' common ancestor, so
+      # files from tauri/release/v<version>/ would land in dist/client/v<version>/
+      # of the release job, which takes the files from dist/client/ itself.
+      - name: Collect the files for the Release
+        shell: powershell
+        working-directory: tauri
+        run: |
+          New-Item -ItemType Directory -Force release\github | Out-Null
+          Copy-Item release\v*\Token-Monitor-Rust_*_x64-setup.exe, release\v*\Token-Monitor-Rust_*_x64-setup.exe.sig, release\v*\latest.json release\github\
       - uses: actions/upload-artifact@v4
         with:
           name: client-rust
           # The installer, its updater signature and latest.json.
           path: |
-            tauri/release/v*/Token-Monitor-Rust_*_x64-setup.exe
-            tauri/release/v*/Token-Monitor-Rust_*_x64-setup.exe.sig
-            tauri/release/v*/latest.json
+            tauri/release/github/Token-Monitor-Rust_*_x64-setup.exe
+            tauri/release/github/Token-Monitor-Rust_*_x64-setup.exe.sig
+            tauri/release/github/latest.json
           if-no-files-found: error
           retention-days: 30
 
