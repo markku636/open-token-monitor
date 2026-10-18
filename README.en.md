@@ -2,7 +2,7 @@
 
 [繁體中文](README.md) | **English**
 
-A self-hosted team edition of [Token Monitor](https://github.com/Javis603/token-monitor) for organisations: track AI coding tool usage (Claude Code, Codex, Cursor, Copilot and more) across every employee's machine, in one hub with a database, an organisation chart, a dashboard and reports.
+A self-hosted team edition for organisations, customised from [Token Monitor](https://github.com/Javis603/token-monitor), Javis's open-source project: track AI coding tool usage (Claude Code, Codex, Cursor, Copilot and more) across every employee's machine, in one hub with a database, an organisation chart, a dashboard and reports.
 
 Upstream Token Monitor is a desktop widget with an optional hub. This repository keeps upstream unchanged and adds what a company deployment needs on top of it:
 
@@ -11,6 +11,18 @@ Upstream Token Monitor is a desktop widget with an optional hub. This repository
 - **Rust/Tauri client** (`tauri/`): a lighter client written in Rust. It uploads exactly what upstream's client uploads, field for field, and also has a headless `tm-agent`.
 
 The docs are in Traditional Chinese.
+
+## Where the original code comes from
+
+This project wasn't written from scratch. The original code is [Token Monitor](https://github.com/Javis603/token-monitor) by Javis ([@Javis603](https://github.com/Javis603)), MIT licensed: a local-first desktop widget that tracks tokens, cost and limits for AI coding tools such as Claude Code, Codex and Cursor, with an optional hub to sync several devices.
+
+We took it and customised it for company use:
+
+- The desktop widget, the usage scanning, the hub and the upload format are upstream's code, kept unchanged in [`upstream/`](upstream/).
+- The hub overlay, the Electron packaging and the Rust client listed above are our customisations for a company deployment.
+- New upstream releases are pulled in as described in [Updating when upstream releases a new version](#updating-when-upstream-releases-a-new-version).
+
+This project is not affiliated with or endorsed by the upstream author. Please open issues here, not upstream.
 
 ## How it differs from upstream
 

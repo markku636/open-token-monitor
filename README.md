@@ -2,7 +2,7 @@
 
 **繁體中文** | [English](README.en.md)
 
-[Token Monitor](https://github.com/Javis603/token-monitor) 的自架團隊版，給組織使用。它把每位員工電腦上 AI coding 工具（Claude Code、Codex、Cursor、Copilot 等）的用量，集中到同一個 hub。hub 有資料庫、組織架構、dashboard 與報表。
+拿 Javis 開源的 [Token Monitor](https://github.com/Javis603/token-monitor) 客製而成的自架團隊版，給組織使用。它把每位員工電腦上 AI coding 工具（Claude Code、Codex、Cursor、Copilot 等）的用量，集中到同一個 hub。hub 有資料庫、組織架構、dashboard 與報表。
 
 上游 Token Monitor 是桌面小工具，hub 是選用的。這個 repo 不改上游，只在上面加上公司部署需要的部分：
 
@@ -14,6 +14,18 @@
   - 它疊在上游的 hub 前面執行。
 - **Electron 用戶端打包**（`client/`、`packaging/`）：上游的桌面 app，打包時預填你的 hub 網址與 client 金鑰。第一次開啟就會連上 hub、每 30 分鐘上傳一次，並設定開機自動啟動。
 - **Rust/Tauri 用戶端**（`tauri/`）：用 Rust 寫的輕量用戶端。它上傳的內容和上游用戶端逐欄相同，另外提供不需要畫面的 `tm-agent`。
+
+## 原始程式碼從哪來
+
+這個專案不是從零寫的。原始程式碼是 Javis（[@Javis603](https://github.com/Javis603)）開源的 [Token Monitor](https://github.com/Javis603/token-monitor)，MIT 授權：一個本機優先的桌面小工具，記錄 Claude Code、Codex、Cursor 等 AI coding 工具的 token、成本與額度，並可以選擇用 hub 同步多台裝置。
+
+我們拿它來客製成公司用的版本：
+
+- 桌面小工具、用量掃描、hub 與上傳格式都是上游的程式碼，原封不動放在 [`upstream/`](upstream/)。
+- 上面列的 hub overlay、Electron 打包與 Rust 用戶端，是我們為了公司部署加上的客製。
+- 上游出新版時，照「[上游出新版時怎麼更新](#上游出新版時怎麼更新)」拉進來。
+
+本專案與上游作者沒有隸屬或背書關係，問題請開在本 repo，不要開到上游。
 
 ## 和上游版的差異
 
